@@ -153,7 +153,42 @@ class OrchestratorRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.report, report)
         self.assertIn("研究计划已生成", result.events)
         self.assertIn("报告已生成", result.events)
-        self.assertEqual(persist.await_count, 4)
+        self.assertEqual(persist.await_count, 5)
+
+    async def test_resume_from_critic_checkpoint_reuses_saved_critique(self):
+        from backend.src.research.schemas import ResearchRun
+
+        task = make_task(task_id="task_resume")
+        finding = make_finding(finding_id="finding_resume", task_id=task.id)
+        evidence = make_evidence(evidence_id="evidence_resume", task_id=task.id)
+        critique = CriticReview(decision="approve", iteration=1,
+                                approved_finding_ids=[finding.id])
+        run = ResearchRun(
+            user_request="Resume at critic",
+            status=RunStatus.CRITIC_REVIEW,
+            iteration=1,
+            resume_status=RunStatus.CRITIC_REVIEW,
+            resume_iteration=1,
+            plan=make_plan(task=task),
+            findings=[finding],
+            evidence=[evidence],
+            critique=critique,
+            critiques=[critique],
+        )
+        report = make_report(evidence=evidence)
+        stubs = make_stubs()
+        stubs.critic.run = AsyncMock(side_effect=AssertionError("must reuse persisted critique"))
+        stubs.writer.run = AsyncMock(return_value=report)
+        stubs.writer.citations_are_valid = MagicMock(return_value=True)
+
+        result = await ResearchOrchestrator(
+            stubs.planner, stubs.researcher, stubs.reviewer,
+            stubs.synthesizer, stubs.critic, stubs.writer,
+        ).run(run)
+
+        self.assertEqual(result.status, RunStatus.COMPLETED)
+        stubs.critic.run.assert_not_awaited()
+        stubs.writer.run.assert_awaited_once()
 
     async def test_writer_failure_fails_run_without_a_stitched_report(self):
         from backend.src.research.schemas import ResearchRun
@@ -183,7 +218,7 @@ class OrchestratorRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, RunStatus.FAILED)
         self.assertIsNone(result.report)
         self.assertIn("报告综合写作失败，未生成报告", result.events)
-        persist.assert_awaited_once_with(run)
+        self.assertEqual(persist.await_count, 2)
 
     async def test_research_iteration_skips_failed_task_without_blocking(self):
         task = make_task(task_id="task_failed")

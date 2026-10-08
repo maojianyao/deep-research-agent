@@ -29,10 +29,12 @@ class ResearchOrchestrator:
 
     async def run(self, research: ResearchRun) -> ResearchRun:
         """推进运行至终态；可传入已持久化的 ResearchRun 继续执行。"""
+        if self.on_update is not None:
+            await self._persist(research)
         count = 1
         while research.status not in {
             RunStatus.COMPLETED, RunStatus.NEEDS_HUMAN_REVIEW,
-            RunStatus.FAILED, RunStatus.CANCELLED,
+            RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.PAUSED,
         }:
             if research.status is RunStatus.PLANNING:
                 if research.plan is None:
@@ -50,6 +52,7 @@ class ResearchOrchestrator:
                     existing_questions = {task.question for task in research.plan.tasks}
                     new_tasks = [task for task in new_tasks if task.question not in existing_questions]
                     research.plan.tasks.extend(new_tasks)
+                    research.critique = None
                     research.event(f"补证规划已生成 {len(new_tasks)} 个新任务")
                     logger.info(f"\n\n规划agent：第 {count} 次补证规划，新增 {len(new_tasks)} 个任务\n")
                 research.status = RunStatus.RESEARCHING
@@ -60,10 +63,14 @@ class ResearchOrchestrator:
                 logger.info(f"检索agent已完成检索")
             elif research.status is RunStatus.CRITIC_REVIEW:
                 logger.info(f"开始进行证据审查。。。")
-                research.critique = await self.critic.run(
-                    research.findings, research.evidence, research.plan)
+                if research.critique is None or research.critique.iteration != research.iteration:
+                    research.critique = await self.critic.run(
+                        research.findings, research.evidence, research.plan)
+                else:
+                    research.event(f"从已保存的第 {research.iteration} 轮审稿结果继续")
                 research.critique.iteration = research.iteration
-                research.critiques.append(research.critique)
+                if not any(item.iteration == research.iteration for item in research.critiques):
+                    research.critiques.append(research.critique)
                 logger.info(f"\n\n审稿agent：\n"
                             f"审稿意见：{research.critique}\n")
                 self._apply_critique(research)
@@ -102,6 +109,12 @@ class ResearchOrchestrator:
         """Persist after each state transition; research continues if storage fails."""
         if self.on_update is None:
             return
+        if research.status not in {
+            RunStatus.COMPLETED, RunStatus.NEEDS_HUMAN_REVIEW,
+            RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.PAUSED,
+        }:
+            research.resume_status = research.status
+            research.resume_iteration = research.iteration
         try:
             await self.on_update(research)
         except Exception as e:

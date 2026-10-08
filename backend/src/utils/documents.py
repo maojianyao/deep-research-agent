@@ -43,9 +43,14 @@ def infer_source_type_from_domain(url: str) -> str:
 
     if any(domain.endswith(suf) for suf in (".gov", ".gov.cn", ".mil", ".gov.uk", ".europa.eu", ".who.int", ".un.org")):
         return "government"
-    if any(domain.endswith(suf) for suf in (".edu", ".edu.cn", ".ac.uk", ".ac.jp")):
+    if any(domain.endswith(suf) for suf in (".edu", ".edu.cn", ".ac.uk", ".ac.jp", "ac.cn")):
         return "academic"
-    if any(sub in domain for sub in ("arxiv.org", "biorxiv.org", "medrxiv.org", "researchgate.net", "ssrn.com")):
+    if any(sub in domain for sub in ("arxiv.org", "biorxiv.org", "medrxiv.org",
+                                     "researchgate.net", "ssrn.com", "neurips.cc",
+                                     "psyarxiv.com", "core.ac.uk", "biomedcentral.com",
+                                     "pubscholar.cn", "cnki.net", "springer.com",
+                                     "sciencedirect.com"
+                                     )):
         return "academic"
     if any(sub in domain for sub in ("reuters.com", "bloomberg.com", "ft.com", "wsj.com", "caixin.com", "bbc.com", "apnews.com", "xinhuanet.com", "cctv.com", "nytimes.com")):
         return "news_major"

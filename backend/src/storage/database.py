@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 from .models import Base
@@ -25,3 +25,11 @@ def create_db_engine(url: str | None = None) -> Engine:
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    columns = {column["name"] for column in inspect(engine).get_columns("research_runs")}
+    with engine.begin() as connection:
+        if "resume_status" not in columns:
+            connection.execute(text("ALTER TABLE research_runs ADD COLUMN resume_status VARCHAR(32)"))
+        if "resume_iteration" not in columns:
+            connection.execute(text(
+                "ALTER TABLE research_runs ADD COLUMN resume_iteration INTEGER NOT NULL DEFAULT 0"
+            ))

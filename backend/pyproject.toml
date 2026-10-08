@@ -1,0 +1,51 @@
+[project]
+name = "deep-research-agent"
+version = "0.1.0"
+description = "Deep research agent with FastAPI backend and multi-agent research pipeline"
+requires-python = ">=3.12"
+dependencies = [
+    # langchain
+    "langchain>=1.3.15",
+    "langchain-mcp-adapters==0.3.2",
+    "langchain-openai>=0.2.0",
+
+    # FastAPI 和相关依赖
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy>=2.0.0",
+
+    # HTTP 客户端
+    "httpx>=0.27.0",
+    "aiohttp>=3.10.0",
+    "requests>=2.31.0",
+
+    # Web 搜索
+    "ddgs",
+
+    # 时区
+    "tzlocal",
+
+    # 环境变量管理
+    "python-dotenv>=1.0.0",
+
+    # CORS / 表单支持
+    "python-multipart>=0.0.9",
+
+    # MCP 相关
+    "fastmcp>=2.0.0",
+    "uv>=0.8.0",
+
+    # 其他工具
+    "python-dateutil>=2.8.2",
+    "huggingface-hub>=0.25.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.uv]
+package = false

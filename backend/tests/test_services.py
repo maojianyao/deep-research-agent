@@ -115,6 +115,15 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(config.fetch_full_page)
         self.assertFalse(config.use_tool_calling)
 
+    def test_tool_calling_defaults_to_enabled(self):
+        env = {
+            "LLM_API_KEY": "test-key",
+            "LLM_BASE_URL": "https://api.example.com/v1",
+            "LLM_MODEL": "test-model",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            self.assertTrue(Configuration.from_env().use_tool_calling)
+
     def test_sanitized_ollama_url_appends_v1(self):
         config = self.make_config()
         config.ollama_base_url = "http://localhost:11434"

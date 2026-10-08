@@ -18,6 +18,9 @@ requests>=2.31.0
 # Web搜索
 ddgs
 
+# 时区
+tzlocal
+
 # 环境变量管理
 python-dotenv>=1.0.0
 

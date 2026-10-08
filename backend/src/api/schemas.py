@@ -21,6 +21,9 @@ class ResearchRunSummary(BaseModel):
     id: str
     user_request: str
     status: RunStatus
+    resume_status: RunStatus | None = None
+    unfinished_tasks: int = 0
+    can_resume: bool = False
     iteration: int
     max_iterations: int
     created_at: datetime
@@ -138,6 +141,8 @@ class ResearchRunDetail(BaseModel):
     id: str
     user_request: str
     status: RunStatus
+    can_resume: bool = False
+    error: str | None = None
     iteration: int
     max_iterations: int
     created_at: datetime
@@ -149,6 +154,27 @@ class ResearchRunDetail(BaseModel):
     critiques: list[CritiqueView]
     report: ReportView | None = None
     events: list[RunEventView]
+
+
+class CitationSourceView(BaseModel):
+    evidence_id: str
+    claim: str
+    excerpt: str
+    locator: str | None = None
+    url: str
+    title: str
+    publisher: str | None = None
+    published_at: str | None = None
+    source_type: str
+
+
+class CitationReferenceView(BaseModel):
+    run_id: str
+    reference_id: str
+    reference_type: str
+    finding_statement: str | None = None
+    sources: list[CitationSourceView]
+    urls: list[str]
 
 
 class HealthStatus(BaseModel):

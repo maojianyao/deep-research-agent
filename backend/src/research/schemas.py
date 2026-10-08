@@ -39,6 +39,7 @@ class RunStatus(str, Enum):
     NEEDS_HUMAN_REVIEW = "needs_human_review"       # 需人工复核
     FAILED = "failed"       # 研究失败
     CANCELLED = "cancelled"   # 用户主动取消
+    PAUSED = "paused"         # 服务停止或重启，保留断点待继续
 
 
 class ResearchTask(BaseModel):
@@ -393,6 +394,8 @@ class ResearchRun(BaseModel):
     max_iterations: int = Field(default=3, ge=1, description="Critic 可要求补证的最大轮次，至少为 1。")
     iteration: int = Field(default=0, ge=0, description="已完成的检索轮次，不允许为负数。")
     status: RunStatus = Field(default=RunStatus.PLANNING, description="编排器当前所处的状态。")
+    resume_status: RunStatus | None = Field(default=None, description="最近一次已持久化的可续跑状态。")
+    resume_iteration: int = Field(default=0, ge=0, description="对应续跑状态的已持久化检索轮次。")
     plan: ResearchPlan | None = Field(default=None, description="Planner 完成后生成的研究计划。")
     candidates: list[CandidateEvidence] = Field(default_factory=list, description="尚未或已经审查的候选证据记录。")
     evidence: list[EvidenceCard] = Field(default_factory=list, description="审查后可被结论和报告引用的证据。")

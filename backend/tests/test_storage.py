@@ -6,11 +6,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, func, inspect, select
 
-from backend.src.research.schemas import CriticIssue, CriticReview, ResearchRun, RunStatus
+from backend.src.research.schemas import CriticIssue, CriticReview, ReportBlock, ResearchRun, RunStatus
 from backend.src.storage import ResearchRunRepository, create_db_engine, init_db
-from backend.src.storage.models import SourceDocumentModel
+from backend.src.storage.models import (
+    Base, CandidateEvidenceModel, CriticIssueModel, CriticReviewModel,
+    EvidenceCardModel, FindingModel, ReportBlockModel, ReportModel,
+    ResearchPlanModel, ResearchRunModel, ResearchTaskModel, RunEventModel,
+    SourceDocumentModel, critic_approved_finding, finding_evidence,
+    report_block_evidence, report_block_finding,
+)
 from backend.tests.factories import (
     make_candidate, make_evidence, make_finding, make_plan, make_report, make_task,
 )
@@ -138,20 +144,80 @@ class StorageRepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["research_question"], run.plan.research_question)
         self.assertEqual(rows[0]["title"], run.report.title)
 
+    def test_list_runs_resume_flag_only_applies_to_resumable_runs(self):
+        legacy_cancelled = make_persisted_run("_legacy_cancelled")
+        legacy_cancelled.status = RunStatus.CANCELLED
+        legacy_cancelled.plan.tasks[0].completed = False
+        completed = make_persisted_run("_done")
+        self.repository.save_run(legacy_cancelled)
+        self.repository.save_run(completed)
+
+        rows = {row["id"]: row for row in self.repository.list_runs()}
+
+        self.assertTrue(rows[legacy_cancelled.id]["can_resume"])
+        self.assertFalse(rows[completed.id]["can_resume"])
+
     def test_load_run_rebuilds_domain_state_for_resume(self):
         run = make_persisted_run()
         run.status = RunStatus.RESEARCHING
+        run.resume_status = RunStatus.CRITIC_REVIEW
+        run.resume_iteration = 2
         self.repository.save_run(run)
 
         loaded = self.repository.load_run(run.id)
 
         self.assertEqual(loaded.status, RunStatus.RESEARCHING)
+        self.assertEqual(loaded.resume_status, RunStatus.CRITIC_REVIEW)
+        self.assertEqual(loaded.resume_iteration, 2)
         self.assertEqual(loaded.plan.tasks[0].id, run.plan.tasks[0].id)
         self.assertEqual(loaded.evidence[0].id, run.evidence[0].id)
         self.assertEqual(loaded.findings[0].evidence_ids, run.findings[0].evidence_ids)
         self.assertEqual(loaded.critique.approved_finding_ids, run.critique.approved_finding_ids)
         self.assertEqual(loaded.report.title, run.report.title)
         self.assertEqual(loaded.events, run.events)
+
+    def test_startup_pauses_runs_left_in_active_phases(self):
+        run = make_persisted_run()
+        run.status = RunStatus.CRITIC_REVIEW
+        run.iteration = 2
+        self.repository.save_run(run)
+
+        self.assertEqual(self.repository.pause_interrupted_runs(), 1)
+        paused = self.repository.load_run(run.id)
+        self.assertEqual(paused.status, RunStatus.PAUSED)
+        self.assertEqual(paused.resume_status, RunStatus.CRITIC_REVIEW)
+        self.assertEqual(paused.resume_iteration, 2)
+        self.assertIn("后端服务已重启", paused.events[-1])
+
+    def test_legacy_cancelled_run_with_unfinished_tasks_can_resume(self):
+        run = make_persisted_run("_legacy_cancelled")
+        run.status = RunStatus.CANCELLED
+        run.iteration = 1
+        run.plan.tasks[0].completed = False
+        self.repository.save_run(run)
+
+        summary = self.repository.list_runs()[0]
+
+        self.assertEqual(summary["id"], run.id)
+        self.assertTrue(summary["can_resume"])
+        self.assertEqual(summary["unfinished_tasks"], 1)
+
+    def test_init_db_migrates_old_runs_table_idempotently(self):
+        old_engine = create_engine(f"sqlite:///{Path(self.temp.name) / 'legacy.db'}")
+        with old_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE research_runs (id VARCHAR(32) PRIMARY KEY, user_request TEXT NOT NULL, "
+                "status VARCHAR(32) NOT NULL, max_iterations INTEGER NOT NULL DEFAULT 3, "
+                "iteration INTEGER NOT NULL DEFAULT 0, created_at DATETIME, updated_at DATETIME)"
+            )
+
+        init_db(old_engine)
+        init_db(old_engine)
+
+        columns = {item["name"] for item in inspect(old_engine).get_columns("research_runs")}
+        self.assertIn("resume_status", columns)
+        self.assertIn("resume_iteration", columns)
+        old_engine.dispose()
 
     def test_get_progress_returns_only_new_events(self):
         run = make_persisted_run()
@@ -163,6 +229,134 @@ class StorageRepositoryTests(unittest.TestCase):
         self.assertEqual([item["sequence"] for item in progress["events"]], [2])
         self.assertEqual(progress["events"][0]["message"], "second event")
         self.assertIsNone(self.repository.get_progress("missing"))
+
+    def test_delete_run_removes_owned_rows_and_retains_source_shared_by_another_run(self):
+        first = make_persisted_run()
+        second = make_persisted_run("_shared")
+        second.evidence[0].source = first.evidence[0].source
+        second.candidates[0].source = first.evidence[0].source
+        second.report = make_report(
+            evidence=second.evidence[0],
+            blocks=[
+                ReportBlock(heading="Summary", text="Summary"),
+                ReportBlock(
+                    heading="Finding",
+                    text="Finding",
+                    finding_ids=[second.findings[0].id],
+                    evidence_ids=[second.evidence[0].id],
+                ),
+            ],
+        )
+        self.repository.save_run(first)
+        self.repository.save_run(second)
+
+        self.assertTrue(self.repository.delete_run(first.id))
+        self.assertIsNone(self.repository.get_run(first.id))
+        self.assertIsNotNone(self.repository.get_run(second.id))
+        self.assertIsNotNone(self.repository.load_run(second.id))
+        self.assertFalse(self.repository.delete_run("missing"))
+
+        with self.engine.connect() as connection:
+            source_count = connection.scalar(select(func.count()).select_from(SourceDocumentModel))
+        self.assertEqual(source_count, 1)
+
+        owned_tables = [
+            ResearchRunModel, ResearchPlanModel, ResearchTaskModel,
+            CandidateEvidenceModel, EvidenceCardModel, FindingModel,
+            CriticReviewModel, CriticIssueModel, ReportModel, ReportBlockModel,
+            RunEventModel,
+        ]
+        with self.engine.connect() as connection:
+            for model in owned_tables:
+                if model is ResearchRunModel:
+                    query = select(func.count()).select_from(model).where(model.id == first.id)
+                elif model is ResearchPlanModel or model is ReportModel:
+                    query = select(func.count()).select_from(model).where(model.run_id == first.id)
+                elif model is CriticIssueModel:
+                    query = select(func.count()).select_from(model).where(
+                        model.review_id.in_(
+                            select(CriticReviewModel.id).where(CriticReviewModel.run_id == first.id)
+                        )
+                    )
+                elif model is ReportBlockModel:
+                    query = select(func.count()).select_from(model).where(
+                        model.report_run_id == first.id
+                    )
+                else:
+                    query = select(func.count()).select_from(model).where(model.run_id == first.id)
+                self.assertEqual(connection.scalar(query), 0, model.__tablename__)
+            self.assertEqual(connection.scalar(
+                select(func.count()).select_from(finding_evidence).where(
+                    finding_evidence.c.finding_id == second.findings[0].id
+                )), 1)
+            remaining_review_ids = select(CriticReviewModel.id).where(CriticReviewModel.run_id == second.id)
+            self.assertEqual(connection.scalar(
+                select(func.count()).select_from(critic_approved_finding).where(
+                    critic_approved_finding.c.review_id.in_(remaining_review_ids)
+                )), 1)
+            remaining_block_ids = select(ReportBlockModel.id).join(
+                ReportModel, ReportBlockModel.report_run_id == ReportModel.run_id
+            ).where(ReportModel.run_id == second.id)
+            self.assertEqual(connection.scalar(
+                select(func.count()).select_from(report_block_finding).where(
+                    report_block_finding.c.block_id.in_(remaining_block_ids)
+                )), 1)
+            self.assertEqual(connection.scalar(
+                select(func.count()).select_from(report_block_evidence).where(
+                    report_block_evidence.c.block_id.in_(remaining_block_ids)
+                )), 1)
+            self.assertEqual(
+                connection.scalar(select(func.count()).select_from(SourceDocumentModel)), 1)
+
+    def test_init_db_migrates_old_runs_table_idempotently(self):
+        old_engine = create_engine(f"sqlite:///{Path(self.temp.name) / 'old.db'}")
+        with old_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE research_runs (id VARCHAR(32) PRIMARY KEY, user_request TEXT NOT NULL, "
+                "status VARCHAR(32) NOT NULL, max_iterations INTEGER NOT NULL DEFAULT 3, "
+                "iteration INTEGER NOT NULL DEFAULT 0, created_at DATETIME, updated_at DATETIME)"
+            )
+
+        init_db(old_engine)
+        init_db(old_engine)
+
+        columns = {column["name"] for column in inspect(old_engine).get_columns("research_runs")}
+        self.assertIn("resume_status", columns)
+        self.assertIn("resume_iteration", columns)
+        old_engine.dispose()
+
+    def test_delete_run_clears_all_owned_association_tables(self):
+        run = make_persisted_run()
+        self.repository.save_run(run)
+
+        self.assertTrue(self.repository.delete_run(run.id))
+
+        with self.engine.connect() as connection:
+            for association in (finding_evidence, critic_approved_finding,
+                                report_block_finding, report_block_evidence):
+                self.assertEqual(
+                    connection.scalar(select(func.count()).select_from(association)), 0,
+                    association.name,
+                )
+            for model in (
+                ResearchRunModel, ResearchPlanModel, ResearchTaskModel,
+                CandidateEvidenceModel, EvidenceCardModel, FindingModel,
+                CriticReviewModel, CriticIssueModel, ReportModel, ReportBlockModel,
+                RunEventModel, SourceDocumentModel,
+            ):
+                self.assertEqual(
+                    connection.scalar(select(func.count()).select_from(model)), 0,
+                    model.__tablename__,
+                )
+
+    def test_delete_run_removes_source_documents_used_only_by_that_run(self):
+        run = make_persisted_run()
+        self.repository.save_run(run)
+
+        self.assertTrue(self.repository.delete_run(run.id))
+        with self.engine.connect() as connection:
+            source_count = connection.scalar(select(func.count()).select_from(SourceDocumentModel))
+        self.assertEqual(source_count, 0)
 
 
 if __name__ == "__main__":

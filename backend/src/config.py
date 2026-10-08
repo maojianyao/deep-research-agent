@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import dotenv
 
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(override=True)
 
 
 class SearchAPI(Enum):
@@ -32,13 +32,14 @@ class Configuration(BaseModel):
     local_llm: str = Field(default="gemma4:e4b", title="本地大模型", description="本地ollama/LMStudio大模型名称")
     llm_provider: str = Field(default="ollama", title="大模型提供商", description="大模型提供者，支持ollama和lmstudio or custom")
     search_api: SearchAPI = Field(default=SearchAPI.DUCKDUCKGO, title="搜索API", description="搜索API，支持perplexity, tavily, duckduckgo, searxng, advanced")
-    enable_notes: bool = Field(default=True, title="是否启用笔记", description="是否启用笔记功能")
-    notes_workspace: str = Field(default="./notes", title="笔记工作区", description="笔记工作区路径")
     fetch_full_page: bool = Field(default=True, title="是否获取完整页面", description="是否获取完整页面内容")
     ollama_base_url: str = Field(default="http://localhost:11434", title="Ollama服务URL", description="Ollama服务基础URL")
     lmstudio_base_url: str = Field(default="http://localhost:1234/v1", title="LMStudio服务URL", description="LMStudio服务基础URL")
-    strip_thinking_tokens: bool = Field(default=True, title="是否去除思考Tokens", description="是否去除<thinking>内容")
-    use_tool_calling: bool = Field(default=True, title="是否使用工具调用", description="对于结构化输出，使用工具调用而非 JSON 模式。")
+    use_tool_calling: bool = Field(
+        default=True,
+        title="是否使用工具调用",
+        description="结构化输出优先使用工具调用；兼容性较差的模型可关闭并使用 JSON Schema。",
+    )
     llm_api_key: str = Field(
         ...,
         title="LLM API Key",
@@ -54,7 +55,17 @@ class Configuration(BaseModel):
         title="LLM Model",
         description="Optional model identifier for custom OpenAI-compatible services",
     )
-
+    host: str = Field(
+        default="0.0.0.0",
+        description="Service host"
+    )
+    port: int = Field(
+        default=8000,
+        description="Service port"
+    )
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000"
+    )
     @classmethod
     def from_env(cls, overrides: Optional[dict[str, Any]] = None) -> "Configuration":
         """从环境变量中加载配置"""
@@ -76,11 +87,11 @@ class Configuration(BaseModel):
             "ollama_base_url": os.getenv("OLLAMA_BASE_URL"),
             "max_web_research_loops": os.getenv("MAX_WEB_RESEARCH_LOOPS"),
             "fetch_full_page": os.getenv("FETCH_FULL_PAGE"),
-            "strip_thinking_tokens": os.getenv("STRIP_THINKING_TOKENS"),
             "use_tool_calling": os.getenv("USE_TOOL_CALLING"),
             "search_api": os.getenv("SEARCH_API"),
-            "enable_notes": os.getenv("ENABLE_NOTES"),
-            "notes_workspace": os.getenv("NOTES_WORKSPACE"),
+            "host": os.getenv("HOST"),
+            "port": os.getenv("PORT"),
+            "cors_origins": os.getenv("CORS_ORIGINS"),
         }
 
         for key, value in env_aliases.items():

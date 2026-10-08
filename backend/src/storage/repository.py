@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.src.research.schemas import (
@@ -36,6 +36,8 @@ class ResearchRunRepository:
                 status=run.status.value,
                 max_iterations=run.max_iterations,
                 iteration=run.iteration,
+                resume_status=run.resume_status.value if run.resume_status else None,
+                resume_iteration=run.resume_iteration,
             )
 
             if run.plan is not None:
@@ -172,12 +174,26 @@ class ResearchRunRepository:
                 ResearchRunModel.id,
                 ResearchRunModel.user_request,
                 ResearchRunModel.status,
+                ResearchRunModel.resume_status,
                 ResearchRunModel.iteration,
                 ResearchRunModel.max_iterations,
                 ResearchRunModel.created_at,
                 ResearchRunModel.updated_at,
                 ResearchPlanModel.research_question,
                 ReportModel.title,
+                select(func.count()).select_from(ResearchTaskModel).where(
+                    ResearchTaskModel.run_id == ResearchRunModel.id,
+                    ResearchTaskModel.completed.is_(False),
+                ).label("unfinished_tasks"),
+                exists(select(1).where(
+                    CriticReviewModel.run_id == ResearchRunModel.id,
+                    CriticReviewModel.iteration == ResearchRunModel.iteration,
+                    CriticReviewModel.decision != "needs_human_review",
+                )).label("can_use_saved_review"),
+                exists(select(1).where(
+                    RunEventModel.run_id == ResearchRunModel.id,
+                    RunEventModel.message == "研究任务已结束",
+                )).label("explicitly_ended"),
             )
             .outerjoin(ResearchPlanModel, ResearchPlanModel.run_id == ResearchRunModel.id)
             .outerjoin(ReportModel, ReportModel.run_id == ResearchRunModel.id)
@@ -186,12 +202,79 @@ class ResearchRunRepository:
         query = query.order_by(ResearchRunModel.updated_at.desc(), ResearchRunModel.id.desc())
         query = query.limit(limit).offset(offset)
         with Session(self.engine) as session:
-            return [row._asdict() for row in session.execute(query).all()]
+            return [{
+                **row._asdict(),
+                "can_resume": row.status != "completed" and (
+                    bool(row.resume_status)
+                    or row.status == "paused"
+                    or (row.status == "failed" and (row.research_question is None
+                        or row.unfinished_tasks > 0 or row.can_use_saved_review))
+                    or (row.status == "cancelled" and not row.explicitly_ended
+                        and (row.unfinished_tasks > 0 or row.can_use_saved_review))
+                    or (row.status == "needs_human_review" and row.unfinished_tasks > 0)
+                ),
+            } for row in session.execute(query).all()]
 
     def count_runs(self, status: str | None = None, search: str | None = None) -> int:
         query = self._run_filters(select(func.count()).select_from(ResearchRunModel), status, search)
         with Session(self.engine) as session:
             return session.scalar(query) or 0
+
+    def delete_run(self, run_id: str) -> bool:
+        """Delete a run and its rows; remove only its now-unreferenced source documents."""
+        with Session(self.engine) as session, session.begin():
+            run = session.get(ResearchRunModel, run_id)
+            if run is None:
+                return False
+
+            source_ids = set(session.scalars(
+                select(CandidateEvidenceModel.source_id).where(
+                    CandidateEvidenceModel.run_id == run_id
+                )
+            ))
+            source_ids.update(session.scalars(
+                select(EvidenceCardModel.source_id).where(EvidenceCardModel.run_id == run_id)
+            ))
+            session.delete(run)
+            session.flush()
+
+            if source_ids:
+                still_used = set(session.scalars(
+                    select(CandidateEvidenceModel.source_id).where(
+                        CandidateEvidenceModel.source_id.in_(source_ids)
+                    )
+                ))
+                still_used.update(session.scalars(
+                    select(EvidenceCardModel.source_id).where(
+                        EvidenceCardModel.source_id.in_(source_ids)
+                    )
+                ))
+                orphaned = source_ids - still_used
+                if orphaned:
+                    session.query(SourceDocumentModel).filter(
+                        SourceDocumentModel.id.in_(orphaned)
+                    ).delete(synchronize_session=False)
+        return True
+
+    def pause_interrupted_runs(self) -> int:
+        """Mark in-process phases left by a previous server lifetime as resumable."""
+        active_statuses = (
+            "planning", "researching", "reviewing_evidence", "synthesizing",
+            "critic_review", "writing",
+        )
+        with Session(self.engine) as session, session.begin():
+            runs = session.scalars(select(ResearchRunModel).where(
+                ResearchRunModel.status.in_(active_statuses)
+            )).all()
+            for run in runs:
+                run.resume_status = run.resume_status or run.status
+                run.resume_iteration = run.iteration
+                run.status = "paused"
+                run.events.append(RunEventModel(
+                    sequence=max((event.sequence for event in run.events), default=0) + 1,
+                    message="后端服务已重启，研究进度已保存；可继续任务",
+                ))
+            return len(runs)
 
     def get_progress(self, run_id: str, after_sequence: int = 0) -> dict | None:
         """Fetch only run state and new events for inexpensive frontend polling."""
@@ -220,6 +303,59 @@ class ResearchRunRepository:
                 "max_iterations": row.max_iterations,
                 "updated_at": row.updated_at,
                 "events": [event._asdict() for event in events],
+            }
+
+    def get_citation_reference(self, run_id: str, reference_id: str) -> dict | None:
+        """Resolve one report evidence/finding ID to its source URLs within a run."""
+        with Session(self.engine) as session:
+            sources = []
+            finding_statement = None
+            if reference_id.startswith("evidence_"):
+                item = session.scalar(
+                    select(EvidenceCardModel)
+                    .where(EvidenceCardModel.run_id == run_id,
+                           EvidenceCardModel.id == reference_id)
+                    .options(selectinload(EvidenceCardModel.source))
+                )
+                if item is None:
+                    return None
+                sources = [item]
+                reference_type = "evidence"
+            elif reference_id.startswith("finding_"):
+                finding = session.scalar(
+                    select(FindingModel)
+                    .where(FindingModel.run_id == run_id,
+                           FindingModel.id == reference_id)
+                    .options(selectinload(FindingModel.evidence)
+                             .selectinload(EvidenceCardModel.source))
+                )
+                if finding is None:
+                    return None
+                sources = finding.evidence
+                finding_statement = finding.statement
+                reference_type = "finding"
+            else:
+                return None
+
+            source_items = [{
+                "evidence_id": item.id,
+                "claim": item.claim,
+                "excerpt": item.excerpt,
+                "locator": item.locator,
+                "url": item.source.url,
+                "title": item.source.title,
+                "publisher": item.source.publisher,
+                "published_at": item.source.published_at,
+                "source_type": item.source.source_type,
+            } for item in sources]
+            urls = list(dict.fromkeys(item["url"] for item in source_items))
+            return {
+                "run_id": run_id,
+                "reference_id": reference_id,
+                "reference_type": reference_type,
+                "finding_statement": finding_statement,
+                "sources": source_items,
+                "urls": urls,
             }
 
     @staticmethod
@@ -352,6 +488,8 @@ class ResearchRunRepository:
             status=RunStatus(model.status),
             max_iterations=model.max_iterations,
             iteration=model.iteration,
+            resume_status=RunStatus(model.resume_status) if model.resume_status else None,
+            resume_iteration=model.resume_iteration,
             plan=plan,
             candidates=candidates,
             evidence=evidence,
