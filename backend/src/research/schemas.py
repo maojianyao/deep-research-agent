@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from backend.src.research.context_budget import truncate_text, DIGEST_STATEMENT_CHARS, DIGEST_CAVEAT_CHARS, \
     DIGEST_MAX_CAVEATS, DIGEST_CLAIM_CHARS, DIGEST_EXCERPT_CHARS, DIGEST_LIMITATION_CHARS, DIGEST_MAX_LIMITATIONS
+from backend.src.utils.documents import document_keys
 
 
 def new_id(prefix: str) -> str:
@@ -37,6 +38,7 @@ class RunStatus(str, Enum):
     COMPLETED = "completed"       # 研究完成
     NEEDS_HUMAN_REVIEW = "needs_human_review"       # 需人工复核
     FAILED = "failed"       # 研究失败
+    CANCELLED = "cancelled"   # 用户主动取消
 
 
 class ResearchTask(BaseModel):
@@ -129,6 +131,8 @@ class SourceRef(BaseModel):
 class CandidateEvidence(BaseModel):
     """Researcher 从原始资料中提取、尚未经审查的候选证据。"""
 
+    task_id: str | None = Field(default=None, description="候选证据所属任务 ID；由应用层回填。")
+    iteration: int = Field(default=0, ge=0, description="产生该候选证据的检索轮次。")
     source: SourceDocument = Field(description="候选证据所属的原始来源。")
     claim: str = Field(min_length=1, description="候选证据拟支持或反驳的主张。")
     excerpt: str = Field(min_length=1, description="直接相关的原文摘录，不能为空。")
@@ -158,8 +162,11 @@ class CandidateEvidenceBatchDraft(BaseModel):
     def to_candidates(self, documents: dict[str, SourceDocument]) -> tuple[list[CandidateEvidence], list[str]]:
         """按 URL 回绑真实来源；返回（候选证据列表, 模型编造的未知 URL 列表）。"""
         candidates, unknown = [], []
+        documents_by_url = {document_keys(url, doc.title)[0]: doc for url, doc in documents.items()}
         for draft in self.items:
-            source = documents.get(draft.source_url) or documents.get(draft.source_url.rstrip("/"))
+            source = (documents.get(draft.source_url)
+                      or documents.get(draft.source_url.rstrip("/"))
+                      or documents_by_url.get(document_keys(draft.source_url, "")[0]))
             if source is None:
                 unknown.append(draft.source_url)
                 continue
@@ -174,6 +181,7 @@ class EvidenceCard(BaseModel):
 
     id: str = Field(default_factory=lambda: new_id("evidence"), description="证据的稳定标识符。")
     task_id: str = Field(description="证据所属研究任务 ID。")
+    iteration: int = Field(default=0, ge=0, description="产生该证据卡的检索轮次。")
     claim: str = Field(min_length=1, description="该证据所对应的主张。")
     excerpt: str = Field(min_length=1, description="用于复核的直接原文。")
     source: SourceDocument = Field(description="原始来源及其元数据。")
@@ -229,6 +237,7 @@ class Finding(BaseModel):
 
     id: str = Field(default_factory=lambda: new_id("finding"), description="结论的稳定标识符。")
     task_id: str = Field(description="该结论回答的任务 ID。")
+    iteration: int = Field(default=0, ge=0, description="产生该结论的检索轮次。")
     statement: str = Field(min_length=1, description="带限定条件的结论表述。")
     classification: Literal["fact", "inference", "contested"] = Field(description="事实、推断或存在争议的判断。")
     evidence_ids: list[str] = Field(min_length=1, description="支撑此结论的已审查证据 ID，至少一条。")
@@ -275,6 +284,7 @@ class CriticReview(BaseModel):
     """Critic 对当前证据集的闸门决策。"""
 
     decision: Literal["approve", "research_more", "needs_human_review"] = Field(description="批准写作、继续研究或交由人工决定。")
+    iteration: int = Field(default=0, ge=0, description="该审稿意见对应的检索轮次。")
     issues: list[CriticIssue] = Field(default_factory=list, description="需修复、降级或补证的问题。")
     approved_finding_ids: list[str] = Field(default_factory=list, description="获准进入报告的结论 ID。")
 
@@ -350,10 +360,18 @@ class ReportDraft(BaseModel):
         known = {item.id: item for item in evidence or []}
         cited = [eid for block in self.blocks for eid in block.evidence_ids if eid in known]
         if cited:
+            seen_sources: set[str] = set()
+            unique_sources = []
+            for eid in dict.fromkeys(cited):
+                source = known[eid].source
+                keys = {key for key in document_keys(str(source.url), source.title) if key}
+                if keys & seen_sources:
+                    continue
+                seen_sources.update(keys)
+                unique_sources.append(source)
             lines.append("## 参考文献")
             lines.append("")
-            for index, eid in enumerate(dict.fromkeys(cited), start=1):
-                source = known[eid].source
+            for index, source in enumerate(unique_sources, start=1):
                 meta = "，".join(part for part in (source.publisher, source.published_at) if part)
                 lines.append(f"{index}. [{source.title}]({source.url})" + (f"（{meta}）" if meta else ""))
             lines.append("")
@@ -380,6 +398,7 @@ class ResearchRun(BaseModel):
     evidence: list[EvidenceCard] = Field(default_factory=list, description="审查后可被结论和报告引用的证据。")
     findings: list[Finding] = Field(default_factory=list, description="基于已审查证据形成的结论。")
     critique: CriticReview | None = Field(default=None, description="最近一次反方审稿结果。")
+    critiques: list[CriticReview] = Field(default_factory=list, description="历次反方审稿结果。")
     report: ReportDraft | None = Field(default=None, description="通过审稿后生成的报告草稿。")
     events: list[str] = Field(default_factory=list, description="状态转换和关键动作的审计事件。")
 

@@ -19,7 +19,7 @@ from backend.src.research.schemas import (
     ResearchTaskDraft, SectionDraft, SupplementPlanDraft,
 )
 from backend.tests.factories import (
-    make_candidate, make_evidence, make_finding, make_outline, make_report, make_section,
+    make_candidate, make_evidence, make_finding, make_outline, make_plan, make_report, make_section,
     make_source, make_summary, make_task,
 )
 
@@ -28,6 +28,7 @@ def make_researcher() -> ResearcherAgent:
     agent = object.__new__(ResearcherAgent)
     agent.searches = []
     agent._semaphore = asyncio.Semaphore(4)
+    agent._seen_documents = set()
     return agent
 
 
@@ -56,7 +57,6 @@ def make_writer() -> WriterAgent:
     agent.outline_agent = "fake-outline-agent"
     agent.section_agent = "fake-section-agent"
     agent.summary_agent = "fake-summary-agent"
-    agent._semaphore = asyncio.Semaphore(3)
     return agent
 
 
@@ -110,12 +110,23 @@ class ResearcherAgentTests(unittest.IsolatedAsyncioTestCase):
 
     def test_relevance_weights_title_more_than_content(self):
         tokens = {"example"}
-        title_hit = make_source(title="Example title", content="other")
-        content_hit = make_source(title="other", content="example")
+        title_hit = make_source(title="Example title", content="other", source_type="unknown")
+        content_hit = make_source(title="other", content="example", source_type="unknown")
         self.assertGreater(
             ResearcherAgent._relevance(title_hit, tokens),
             ResearcherAgent._relevance(content_hit, tokens),
         )
+
+    def test_relevance_boosts_primary_and_required_sources(self):
+        tokens = {"topic"}
+        normal = make_source(title="topic", content="text", source_type="unknown")
+        primary = make_source(title="topic", content="text", source_type="government")
+        self.assertGreater(
+            ResearcherAgent._relevance(primary, tokens),
+            ResearcherAgent._relevance(normal, tokens),
+        )
+        boosted = ResearcherAgent._relevance(primary, tokens, required_types=["government"])
+        self.assertGreater(boosted, ResearcherAgent._relevance(primary, tokens))
 
     def test_select_documents_filters_short_content_and_limits_domains(self):
         task = make_task(question="example")
@@ -164,6 +175,25 @@ class ResearcherAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(len(result[0]), 1)
 
+    async def test_search_all_deduplicates_across_sources_by_url_and_title(self):
+        researcher = make_researcher()
+
+        async def first_source(query):
+            return [make_source(url="https://example.com/a?utm_source=x")]
+
+        async def second_source(query):
+            return [
+                make_source(url="https://example.com/a"),
+                make_source(url="https://example.com/b", title="Example source"),
+            ]
+
+        researcher.searches = [first_source, second_source]
+        result = await researcher._search_all("query")
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(len(result[0]), 1)
+        self.assertEqual(result[1], [])
+
     async def test_run_deduplicates_candidates_by_url(self):
         researcher = make_researcher()
         first = make_candidate(url="https://example.com/a")
@@ -178,6 +208,20 @@ class ResearcherAgentTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(result), 2)
         self.assertEqual(extract.await_count, 2)
+
+    async def test_run_preserves_distinct_claims_from_same_url(self):
+        researcher = make_researcher()
+        url = "https://example.com/a"
+        candidates = [
+            make_candidate(url=url, claim="First claim"),
+            make_candidate(url=url, claim="First claim"),
+            make_candidate(url=url, claim="Second claim"),
+        ]
+
+        with patch.object(researcher, "_extract", AsyncMock(return_value=candidates)):
+            result = await researcher.run(make_task(queries=["q"]))
+
+        self.assertEqual([item.claim for item in result], ["First claim", "Second claim"])
 
 
 class EvidenceReviewerAgentTests(unittest.IsolatedAsyncioTestCase):
@@ -292,6 +336,7 @@ class CriticAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_builds_round_robin_payload_and_returns_review(self):
         critic = make_critic()
         finding = make_finding(finding_id="finding_1", task_id="task_1")
+        plan = make_plan()
         evidence = [
             make_evidence(evidence_id="evidence_b1", task_id="task_b", confidence=0.9),
             make_evidence(evidence_id="evidence_a1", task_id="task_a", confidence=0.8),
@@ -301,7 +346,7 @@ class CriticAgentTests(unittest.IsolatedAsyncioTestCase):
         review = CriticReview(decision="approve")
 
         with patch("backend.src.research.agents.critic._ainvoke", AsyncMock(return_value=review)) as invoke:
-            result = await critic.run([finding], evidence)
+            result = await critic.run([finding], evidence, plan)
 
         self.assertIs(result, review)
         payload = json.loads(invoke.await_args.args[2])
@@ -310,26 +355,32 @@ class CriticAgentTests(unittest.IsolatedAsyncioTestCase):
             ["evidence_b1", "evidence_a1", "evidence_b2", "evidence_a2"],
         )
         self.assertEqual(payload["findings"][0]["id"], "finding_1")
+        self.assertEqual(payload["research_plan"]["research_question"], plan.research_question)
+        self.assertEqual(payload["research_plan"]["tasks"][0]["id"], plan.tasks[0].id)
 
 
 class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_plan_outline_filters_unknown_and_assigns_unassigned(self):
         writer = make_writer()
-        finding = make_finding(finding_id="finding_assign")
+        findings = [
+            make_finding(finding_id="finding_assign"),
+            make_finding(finding_id="finding_unassigned"),
+        ]
         outline = ReportOutline(
             title="Report",
             sections=[
-                OutlineSection(heading="Method", finding_ids=["missing"]),
-                OutlineSection(heading="Body", finding_ids=[]),
+                OutlineSection(heading="Method", finding_ids=["missing", "finding_assign"]),
+                OutlineSection(heading="Body", finding_ids=["finding_assign"]),
                 OutlineSection(heading="End", finding_ids=[]),
             ],
         )
 
         with patch("backend.src.research.agents.writer._ainvoke", AsyncMock(return_value=outline)):
-            result = await writer.plan_outline("Request", [finding], {})
+            result = await writer.plan_outline("Request", findings, {})
 
-        self.assertEqual(result.sections[0].finding_ids, [])
-        self.assertEqual(result.sections[-1].finding_ids, ["finding_assign"])
+        self.assertEqual(result.sections[0].finding_ids, ["finding_assign"])
+        self.assertEqual(result.sections[1].finding_ids, [])
+        self.assertEqual(result.sections[-1].finding_ids, ["finding_unassigned"])
 
     async def test_write_section_normalizes_model_output(self):
         writer = make_writer()
@@ -356,7 +407,49 @@ class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.finding_ids, ["finding_section"])
         self.assertEqual(result.evidence_ids, ["evidence_section"])
 
-    async def test_write_section_falls_back_to_findings_on_model_error(self):
+    async def test_write_section_receives_actual_previous_and_explicit_next(self):
+        writer = make_writer()
+        outline = make_outline()
+        outline.sections.append(OutlineSection(
+            heading="Conclusion", role="closure", key_points=["Conclusion point"],
+            finding_ids=[],
+        ))
+        previous = make_section(heading="Method", text="Previous section conclusion.")
+        draft = make_section()
+
+        with patch("backend.src.research.agents.writer._ainvoke",
+                   AsyncMock(return_value=draft)) as invoke:
+            await writer.write_section(
+                "Request", outline, 1, {}, {}, {},
+                previous_section=previous,
+            )
+
+        payload = json.loads(invoke.await_args.args[2])
+        self.assertEqual(payload["previous_section"]["text_brief"], "Previous section conclusion.")
+        self.assertEqual(payload["next_section"]["heading"], "Conclusion")
+
+    async def test_run_passes_actual_previous_section_to_next_section(self):
+        writer = make_writer()
+        outline = make_outline()
+        generated = []
+
+        async def fake_section(request, current_outline, index, finding_by_id,
+                               evidence_by_id, task_questions, previous_section=None):
+            section = make_section(heading=current_outline.sections[index].heading,
+                                   text=f"Section {index}")
+            generated.append((section, previous_section))
+            return section
+
+        writer.plan_outline = AsyncMock(return_value=outline)
+        writer.write_section = fake_section
+        writer.write_summary = AsyncMock(return_value=make_summary())
+
+        await writer.run("Request", [make_finding()], [make_evidence()])
+
+        self.assertIsNone(generated[0][1])
+        self.assertIs(generated[1][1], generated[0][0])
+
+    async def test_write_section_propagates_model_error_instead_of_copying_findings(self):
         writer = make_writer()
         outline = make_outline()
         outline.sections[1].finding_ids = ["finding_fallback"]
@@ -365,14 +458,11 @@ class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("backend.src.research.agents.writer._ainvoke",
                    AsyncMock(side_effect=RuntimeError("model failure"))):
-            result = await writer.write_section(
-                "Request", outline, 1,
-                {finding.id: finding}, {evidence.id: evidence}, {},
-            )
-
-        self.assertEqual(result.heading, outline.sections[1].heading)
-        self.assertIn("Example finding", result.text)
-        self.assertEqual(result.finding_ids, ["finding_fallback"])
+            with self.assertRaisesRegex(RuntimeError, "model failure"):
+                await writer.write_section(
+                    "Request", outline, 1,
+                    {finding.id: finding}, {evidence.id: evidence}, {},
+                )
 
     async def test_write_summary_invokes_summary_agent(self):
         writer = make_writer()
@@ -426,6 +516,10 @@ class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(WriterAgent.citations_are_valid(valid, [evidence]))
         self.assertFalse(WriterAgent.citations_are_valid(invalid, [evidence]))
+
+        missing_refs = make_report(evidence=evidence)
+        missing_refs.blocks[1].evidence_ids = []
+        self.assertFalse(WriterAgent.citations_are_valid(missing_refs, [evidence]))
 
 
 if __name__ == "__main__":

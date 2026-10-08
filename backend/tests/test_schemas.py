@@ -77,6 +77,18 @@ class SchemaConversionTests(unittest.TestCase):
         self.assertEqual(len(candidates), 2)
         self.assertEqual(unknown, ["https://unknown.example/x"])
 
+    def test_candidate_batch_rebinds_normalized_url(self):
+        doc = make_source(url="https://example.com/a?utm_source=x")
+        batch = CandidateEvidenceBatchDraft(items=[
+            CandidateEvidenceDraft(source_url="https://example.com/a", claim="Known", excerpt="Excerpt"),
+        ])
+
+        candidates, unknown = batch.to_candidates({str(doc.url): doc})
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(unknown, [])
+        self.assertIs(candidates[0].source, doc)
+
     def test_evidence_digest_limits_sensitive_fields(self):
         evidence = make_evidence(
             claim="x" * 500,
@@ -115,6 +127,28 @@ class ReportSchemaTests(unittest.TestCase):
         self.assertIn("## 参考文献", markdown)
         self.assertIn("Example source", markdown)
         self.assertIn(str(evidence.source.url), markdown)
+
+    def test_report_markdown_deduplicates_references_by_url_and_title(self):
+        source = make_source(url="https://example.com/a?utm_source=x", title="Same source")
+        evidence = [
+            make_evidence(evidence_id="evidence_1", source=source),
+            make_evidence(evidence_id="evidence_2",
+                          source=make_source(url="https://example.com/a", title="Same source")),
+            make_evidence(evidence_id="evidence_3",
+                          source=make_source(url="https://example.com/b", title="Same source")),
+        ]
+        report = make_report(
+            evidence=evidence[0],
+            blocks=[
+                ReportBlock(heading="Summary", text="Summary"),
+                ReportBlock(heading="Finding", text="Finding",
+                            evidence_ids=[item.id for item in evidence]),
+            ],
+        )
+
+        markdown = report.to_markdown(evidence)
+
+        self.assertEqual(markdown.count("[Same source]"), 1)
 
     def test_run_markdown_is_none_before_report(self):
         run = ResearchRun(user_request="Request")

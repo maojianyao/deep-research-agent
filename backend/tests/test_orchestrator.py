@@ -24,28 +24,6 @@ def make_stubs():
     )
 
 
-class OrchestratorHelperTests(unittest.TestCase):
-    def test_findings_merges_supported_evidence_and_averages_confidence(self):
-        task = make_task()
-        supported = [
-            make_evidence(evidence_id="evidence_1", task_id=task.id, claim="Claim 1", confidence=0.7),
-            make_evidence(evidence_id="evidence_2", task_id=task.id, claim="Claim 2", confidence=0.9),
-            make_evidence(evidence_id="evidence_3", task_id=task.id, claim="Claim 3",
-                          verdict="insufficient", confidence=1.0),
-        ]
-        findings = ResearchOrchestrator._findings(task, supported)
-
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0].statement, "Claim 1；Claim 2")
-        self.assertEqual(findings[0].confidence, 0.8)
-        self.assertEqual(findings[0].evidence_ids, ["evidence_1", "evidence_2"])
-
-    def test_findings_returns_empty_without_supported_evidence(self):
-        task = make_task()
-        evidence = [make_evidence(verdict="insufficient")]
-        self.assertEqual(ResearchOrchestrator._findings(task, evidence), [])
-
-
 class SynthesizeFindingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_uses_synthesizer_result_when_available(self):
         task = make_task()
@@ -57,15 +35,14 @@ class SynthesizeFindingsTests(unittest.IsolatedAsyncioTestCase):
         result = await orchestrator._synthesize_findings(task, evidence)
         self.assertEqual(result, [finding])
 
-    async def test_falls_back_to_mechanical_merge_when_synthesizer_fails(self):
+    async def test_does_not_create_a_finding_when_synthesis_fails(self):
         task = make_task()
         evidence = [make_evidence(evidence_id="evidence_fallback", task_id=task.id)]
         orchestrator = ResearchOrchestrator(None, None, None, MagicMock(), None, None)
         orchestrator.synthesizer.run = AsyncMock(return_value=None)
 
         result = await orchestrator._synthesize_findings(task, evidence)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].evidence_ids, ["evidence_fallback"])
+        self.assertEqual(result, [])
 
 
 class ApplyCritiqueTests(unittest.TestCase):
@@ -103,14 +80,14 @@ class ApplyCritiqueTests(unittest.TestCase):
         orchestrator = ResearchOrchestrator(None, None, None, None, None, None)
         orchestrator._apply_critique(run)
         self.assertEqual(run.status, RunStatus.WRITING)
-        self.assertIn("达到最大迭代次数，基于现有证据链降级写作", run.events)
+        self.assertIn("达到最大迭代次数，停止补证并仅基于已批准结论写作", run.events)
 
 
 class WritableFindingsTests(unittest.TestCase):
-    def test_without_critique_returns_all_findings(self):
+    def test_without_critique_does_not_release_findings_to_writer(self):
         run = make_plan_aware_run()
         result = ResearchOrchestrator._writable_findings(run)
-        self.assertEqual(result, run.findings)
+        self.assertEqual(result, [])
 
     def test_prefers_approved_findings(self):
         run = make_plan_aware_run()
@@ -118,11 +95,11 @@ class WritableFindingsTests(unittest.TestCase):
         result = ResearchOrchestrator._writable_findings(run)
         self.assertEqual([item.id for item in result], ["finding_apply"])
 
-    def test_falls_back_to_all_findings_when_none_are_approved(self):
+    def test_excludes_findings_when_critic_approved_none(self):
         run = make_plan_aware_run()
         run.critique = CriticReview(decision="approve", approved_finding_ids=[])
         result = ResearchOrchestrator._writable_findings(run)
-        self.assertEqual(result, run.findings)
+        self.assertEqual(result, [])
 
 
 def make_plan_aware_run(finding=None):
@@ -158,12 +135,14 @@ class OrchestratorRunTests(unittest.IsolatedAsyncioTestCase):
             decision="approve", approved_finding_ids=[finding.id]))
         stubs.writer.run = AsyncMock(return_value=report)
         stubs.writer.citations_are_valid = MagicMock(return_value=True)
+        persist = AsyncMock()
 
         from backend.src.research.schemas import ResearchRun
         run = ResearchRun(user_request="Request")
         result = await ResearchOrchestrator(
             stubs.planner, stubs.researcher, stubs.reviewer,
             stubs.synthesizer, stubs.critic, stubs.writer,
+            on_update=persist,
         ).run(run)
 
         self.assertEqual(result.status, RunStatus.COMPLETED)
@@ -174,6 +153,37 @@ class OrchestratorRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.report, report)
         self.assertIn("研究计划已生成", result.events)
         self.assertIn("报告已生成", result.events)
+        self.assertEqual(persist.await_count, 4)
+
+    async def test_writer_failure_fails_run_without_a_stitched_report(self):
+        from backend.src.research.schemas import ResearchRun
+
+        task = make_task(task_id="task_write")
+        evidence = make_evidence(evidence_id="evidence_write", task_id=task.id)
+        finding = make_finding(
+            finding_id="finding_write", task_id=task.id, evidence_ids=[evidence.id])
+        run = ResearchRun(
+            user_request="Request",
+            status=RunStatus.WRITING,
+            plan=make_plan(task=task),
+            evidence=[evidence],
+            findings=[finding],
+            critique=CriticReview(decision="approve", approved_finding_ids=[finding.id]),
+        )
+        stubs = make_stubs()
+        stubs.writer.run = AsyncMock(side_effect=RuntimeError("model unavailable"))
+        persist = AsyncMock()
+
+        result = await ResearchOrchestrator(
+            stubs.planner, stubs.researcher, stubs.reviewer,
+            stubs.synthesizer, stubs.critic, stubs.writer,
+            on_update=persist,
+        ).run(run)
+
+        self.assertEqual(result.status, RunStatus.FAILED)
+        self.assertIsNone(result.report)
+        self.assertIn("报告综合写作失败，未生成报告", result.events)
+        persist.assert_awaited_once_with(run)
 
     async def test_research_iteration_skips_failed_task_without_blocking(self):
         task = make_task(task_id="task_failed")

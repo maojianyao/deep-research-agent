@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 class SynthesizerAgent:
-    """将同一任务的合格证据综合为连贯结论，替代机械拼接；失败时返回 None 由编排器降级。"""
+    """将同一任务的合格证据综合为连贯结论；失败时返回 None，不伪造结论。"""
     _ROLE = RoleContext(user_role=RoleAgent.SYNTHESIZER)
     _INPUT_BUDGET_TOKENS = SYNTHESIZER_INPUT_BUDGET_TOKENS
     _EXCERPT_CHARS = 800
@@ -49,12 +49,12 @@ class SynthesizerAgent:
             async with self._semaphore:
                 draft: FindingDraft = await _ainvoke(self.agent, self._ROLE, payload)
         except Exception as e:
-            logger.warning("任务 %s 结论综合失败，将降级为机械合并：%s", task.id, e)
+            logger.warning("任务 %s 结论综合失败，交由编排器保留证据并处理：%s", task.id, e)
             return None
         known_ids = {item.id for item in evidence}
         evidence_ids = list(dict.fromkeys(eid for eid in draft.evidence_ids if eid in known_ids))
         if not evidence_ids:
-            logger.warning("任务 %s 综合结论未引用有效证据，将降级为机械合并", task.id)
+            logger.warning("任务 %s 综合结论未引用有效证据，拒绝该结论", task.id)
             return None
         cited = [item for item in evidence if item.id in set(evidence_ids)]
         caveats = list(dict.fromkeys([*draft.caveats, *(limit for item in cited for limit in item.limitations)]))

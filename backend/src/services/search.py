@@ -8,13 +8,16 @@
 """
 import asyncio
 import os, httpx
-import re
-from urllib.parse import urlsplit, parse_qsl, urlencode, urlunsplit
 
 from ddgs import DDGS
 from ddgs.exceptions import DDGSException
 
 from backend.src.research.schemas import SourceDocument
+from backend.src.utils.documents import (
+    clean_text as _clean,
+    infer_source_type_from_domain,
+    normalize_url as _norm_url,
+)
 from backend.src.utils.logger import get_logger
 
 
@@ -27,32 +30,6 @@ logger = get_logger(__name__)
 _MIN_BODY_CHARS = 60
 
 # 常见追踪参数，归一化 URL 时剔除，让跨源重复更易被识别
-_TRACKING_PARAMS = {
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "gclid", "fbclid", "yclid", "ref", "ref_src", "spm", "from", "source",
-}
-
-
-def _norm_url(url: str) -> str:
-    """去掉追踪参数、fragment 与末尾斜杠，便于跨源去重。"""
-    url = str(url)
-    if not url:
-        return ""
-    try:
-        p = urlsplit(url)
-    except ValueError:
-        return url
-    q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
-         if k.lower() not in _TRACKING_PARAMS]
-    path = p.path.rstrip("/") or "/"
-    return urlunsplit((p.scheme.lower(), p.netloc.lower(), path, urlencode(q), ""))
-
-
-def _clean(text: str | None) -> str:
-    """收敛空白：避免多段摘要 / 高亮拼出大片换行噪声。"""
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
 def _prepare(docs: list[SourceDocument], source: str, query: str) -> list[SourceDocument]:
     """统一去重 + 质量过滤，并打印前后条数便于调阈值。"""
     kept: list[SourceDocument] = []
@@ -102,9 +79,10 @@ async def duckduckgo_search(query: str, max_results: int = 5) -> list[SourceDocu
 
         docs = [
             SourceDocument(
-                url=r["href"],
+                url=r.get("href") or "",
                 title=_clean(r.get("title")) or "无标题",
                 content=_clean(r.get("body")),
+                source_type=infer_source_type_from_domain(r.get("href") or ""),
             )
             for r in results
         ]
@@ -140,6 +118,7 @@ async def tavily_search(query: str, max_results: int = 5) -> list[SourceDocument
                 url=item.get("url", ""),
                 title=_clean(item.get("title")) or "无标题",
                 content=_clean(item.get("raw_content") or item.get("content")),
+                source_type=infer_source_type_from_domain(item.get("url", "")),
             )
             for item in items
         ]
@@ -172,6 +151,7 @@ async def parallel_search(query: str, max_results: int = 5) -> list[SourceDocume
                 title=_clean(item.get("title")) or "无标题",
                 published_at=item.get("publish_date"),
                 content=_clean("\n".join(item.get("excerpts") or [])),
+                source_type=infer_source_type_from_domain(item.get("url", "")),
             )
             for item in items
         ]
@@ -206,6 +186,7 @@ async def youcom_search(query: str, max_results: int = 5) -> list[SourceDocument
                     "\n".join(item.get("snippets") or [])
                     or item.get("description")
                 ),
+                source_type=infer_source_type_from_domain(item.get("url", "")),
             )
             for item in entries
         ]
@@ -241,6 +222,7 @@ async def exa_search(query: str, max_results: int = 5) -> list[SourceDocument]:
                 content=_clean(
                     item.get("text") or "\n".join(item.get("highlights") or [])
                 ),
+                source_type=infer_source_type_from_domain(item.get("url", "")),
             )
             for item in items
         ]

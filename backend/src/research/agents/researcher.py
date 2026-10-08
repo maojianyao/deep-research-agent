@@ -19,6 +19,7 @@ from backend.src.research.prompts import dynamic_prompt, RoleContext
 from backend.src.research.schemas import (
     CandidateEvidence, CandidateEvidenceBatchDraft, ResearchTask, RoleAgent, SourceDocument,
 )
+from backend.src.utils.documents import document_keys
 from backend.src.utils.logger import get_logger
 
 
@@ -45,6 +46,7 @@ class ResearcherAgent:
                                   )
         self.searches = searches
         self._semaphore = asyncio.Semaphore(max_concurrent_searches)
+        self._seen_documents: set[str] = set()
 
     async def _bounded(self, factory: Callable[[], Awaitable]):
         """用信号量限制对外部服务（搜索源/LLM）的并发数"""
@@ -57,7 +59,16 @@ class ResearcherAgent:
             *[self._bounded(partial(search, query)) for search in self.searches],
             return_exceptions=True,
         )
-        return [result for result in results if isinstance(result, list)]
+        return [[doc for doc in result if self._is_new_document(doc)]
+                for result in results if isinstance(result, list)]
+
+    def _is_new_document(self, doc: SourceDocument) -> bool:
+        """Deduplicate documents across queries, tasks, and supplement rounds."""
+        keys = {key for key in document_keys(str(doc.url), doc.title) if key}
+        if keys & self._seen_documents:
+            return False
+        self._seen_documents.update(keys)
+        return True
 
     async def _extract(self, task: ResearchTask, queries: list[str]) -> list[CandidateEvidence]:
         """对一批查询执行检索与结构化提取，单次调用的输入输出规模可控。"""
@@ -86,6 +97,8 @@ class ResearcherAgent:
             logger.error("提取批次被上游拒绝，降级为空结果：%s", e)
             return []
         candidates, unknown_urls = batch.to_candidates(documents)
+        for candidate in candidates:
+            candidate.task_id = task.id
         if unknown_urls:
             logger.warning("Researcher 回报了 %d 个未知来源 URL，已丢弃：%r", len(unknown_urls), unknown_urls[:3])
         return self._limit_candidates(candidates)
@@ -99,13 +112,28 @@ class ResearcherAgent:
                       if "\u4e00" <= text[i] <= "\u9fff" and "\u4e00" <= text[i + 1] <= "\u9fff")
         return tokens
 
+    _SOURCE_TYPE_WEIGHTS: dict[str, int] = {
+        "government": 6,
+        "primary": 5,
+        "academic": 5,
+        "peer_reviewed": 5,
+        "news_major": 4,
+        "corporate": 3,
+        "international_org": 5,
+    }
+
     @classmethod
-    def _relevance(cls, doc: SourceDocument, tokens: set[str]) -> int:
-        """轻量相关性：标题命中权重 3，正文命中权重 1；无分词依赖，成本可忽略。"""
+    def _relevance(cls, doc: SourceDocument, tokens: set[str], required_types: list[str] | None = None) -> int:
+        """轻量相关性：标题命中权重 3，正文命中权重 1，叠加通用一手/权威来源权重加成。"""
         if not tokens:
             return 0
         title, content = doc.title.lower(), doc.content.lower()
-        return 3 * sum(1 for token in tokens if token in title) + sum(1 for token in tokens if token in content)
+        score = 3 * sum(1 for token in tokens if token in title) + sum(1 for token in tokens if token in content)
+        st = getattr(doc, "source_type", "unknown") or "unknown"
+        score += cls._SOURCE_TYPE_WEIGHTS.get(st, 0)
+        if required_types and st in required_types:
+            score += 4
+        return score
 
     @classmethod
     def _select_documents(cls, per_query: list[list[list[SourceDocument]]],
@@ -114,7 +142,7 @@ class ResearcherAgent:
         叠加 URL 去重、单域名限流、近似标题去重与无效正文过滤，
         避免入选文档集中自同一查询、同一搜索源或同一域名。"""
         tokens = cls._keywords(task)
-        cells = [sorted(docs, key=lambda item: -cls._relevance(item, tokens))
+        cells = [sorted(docs, key=lambda item: -cls._relevance(item, tokens, task.required_source_types))
                  for source_lists in per_query for docs in source_lists]
         selected: list[SourceDocument] = []
         seen_urls: set[str] = set()
@@ -127,7 +155,7 @@ class ResearcherAgent:
                 # 内层循环弹出并丢弃被约束排除的文档，直到该单元格选中一篇或耗尽
                 while cell and len(selected) < cls._MAX_DOCS_PER_CALL:
                     doc = cell.pop(0)
-                    url = str(doc.url)
+                    url = document_keys(str(doc.url), doc.title)[0]
                     if url in seen_urls or len(doc.content.strip()) < cls._MIN_CONTENT_CHARS:
                         continue
                     norm_title = "".join(ch for ch in doc.title.lower() if ch.isalnum())
@@ -150,7 +178,7 @@ class ResearcherAgent:
         per_url: dict[str, int] = {}
         limited: list[CandidateEvidence] = []
         for item in candidates:
-            url = str(item.source.url)
+            url = document_keys(str(item.source.url), item.source.title)[0]
             if per_url.get(url, 0) >= cls._MAX_CANDIDATES_PER_URL:
                 continue
             per_url[url] = per_url.get(url, 0) + 1
@@ -172,7 +200,9 @@ class ResearcherAgent:
                 continue
             for item in items:
                 # TODO: 去重逻辑待完善
-                key = str(item.source.url)  # (str(item.source.url), item.claim)
+                url = document_keys(str(item.source.url), item.source.title)[0]
+                claim = " ".join(item.claim.lower().split())
+                key = (url, claim)
                 if key not in seen:
                     seen.add(key)
                     candidates.append(item)
