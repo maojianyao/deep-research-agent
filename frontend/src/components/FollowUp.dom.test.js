@@ -296,6 +296,190 @@ describe("report follow-up DOM", () => {
     expect(document.activeElement).toBe(panel.find("[data-follow-up-input]").element);
   });
 
+  test("failed answer shows an error and retry replaces the same assistant response", async () => {
+    const failedThread = {
+      id: "followup_retry",
+      run_id: "run_followup",
+      anchor: {
+        text: "Summary text",
+        start: 0,
+        end: 12,
+        prefix: "",
+        suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        {
+          id: 11, role: "user", sequence: 1, content: "原问题只出现一次",
+          status: "completed", error_code: null, error_message: null,
+          created_at: "2026-10-22T10:01:00",
+        },
+        {
+          id: 12, role: "assistant", sequence: 2, content: "失败前的片段",
+          status: "failed", error_code: "generation_failed",
+          error_message: "模型暂时不可用",
+          created_at: "2026-10-22T10:01:01",
+        },
+      ],
+      stream_cursor: 3,
+      created_at: "2026-10-22T10:01:00",
+      updated_at: "2026-10-22T10:01:01",
+    };
+    let request;
+    globalThis.fetch.mockImplementation(async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        status: 202,
+        json: async () => ({
+          ...failedThread,
+          messages: [
+            failedThread.messages[0],
+            {
+              ...failedThread.messages[1], content: "", status: "generating",
+              error_code: null, error_message: null,
+            },
+          ],
+          stream_cursor: 4,
+        }),
+      };
+    });
+    const { wrapper } = mountCompletedReport(failedThread);
+    await nextTick();
+
+    const panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.text()).toContain("模型暂时不可用");
+    const retry = panel.find("[data-retry-answer]");
+    expect(retry.exists()).toBe(true);
+
+    await retry.trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(request.url).toBe(
+      "/api/research-runs/run_followup/follow-ups/followup_retry/messages/12/retry"
+    );
+    expect(request.options.method).toBe("POST");
+    expect(panel.text().split("原问题只出现一次").length - 1).toBe(1);
+    expect(panel.text()).not.toContain("失败前的片段");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toContain("after_sequence=4");
+
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: failedThread.id,
+      sequence: 5,
+      type: "delta",
+      message_id: 12,
+      content: "重试后的回答",
+      status: "generating",
+    });
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: failedThread.id,
+      sequence: 6,
+      type: "completed",
+      message_id: 12,
+      content: "",
+      status: "completed",
+    });
+    await nextTick();
+
+    expect(panel.text()).toContain("重试后的回答");
+    expect(panel.text().split("原问题只出现一次").length - 1).toBe(1);
+  });
+
+  test("reader can append another question while the full transcript stays visible", async () => {
+    const existingThread = {
+      id: "followup_continue",
+      run_id: "run_followup",
+      anchor: {
+        text: "Summary text",
+        start: 0,
+        end: 12,
+        prefix: "",
+        suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        {
+          id: 21, role: "user", sequence: 1, content: "第一个问题",
+          status: "completed", error_code: null, error_message: null,
+          created_at: "2026-10-22T10:01:00",
+        },
+        {
+          id: 22, role: "assistant", sequence: 2, content: "第一个回答",
+          status: "completed", error_code: null, error_message: null,
+          created_at: "2026-10-22T10:01:01",
+        },
+      ],
+      stream_cursor: 3,
+      created_at: "2026-10-22T10:01:00",
+      updated_at: "2026-10-22T10:01:01",
+    };
+    let request;
+    globalThis.fetch.mockImplementation(async (url, options) => {
+      request = { url, body: JSON.parse(options.body) };
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({
+          ...existingThread,
+          messages: [
+            ...existingThread.messages,
+            {
+              id: 23, role: "user", sequence: 3, content: request.body.question,
+              status: "completed", error_code: null, error_message: null,
+              created_at: "2026-10-22T10:02:00",
+            },
+            {
+              id: 24, role: "assistant", sequence: 4, content: "",
+              status: "generating", error_code: null, error_message: null,
+              created_at: "2026-10-22T10:02:01",
+            },
+          ],
+          stream_cursor: 4,
+        }),
+      };
+    });
+    const { wrapper } = mountCompletedReport(existingThread);
+    await nextTick();
+
+    const panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.find("[data-follow-up-input]").attributes("maxlength")).toBe("2000");
+    await panel.find("[data-follow-up-input]").setValue("第二个问题");
+    await panel.find("form").trigger("submit");
+    await flushPromises();
+    await nextTick();
+
+    expect(request.url).toBe(
+      "/api/research-runs/run_followup/follow-ups/followup_continue/questions"
+    );
+    expect(panel.text()).toContain("第一个问题");
+    expect(panel.text()).toContain("第一个回答");
+    expect(panel.text()).toContain("第二个问题");
+    expect(FakeEventSource.instances[0].url).toContain("after_sequence=4");
+
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: existingThread.id,
+      sequence: 5,
+      type: "delta",
+      message_id: 24,
+      content: "第二个回答",
+      status: "generating",
+    });
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: existingThread.id,
+      sequence: 6,
+      type: "completed",
+      message_id: 24,
+      content: "",
+      status: "completed",
+    });
+    await nextTick();
+
+    expect(panel.text()).toContain("第二个回答");
+    expect(panel.text().split("第一个问题").length - 1).toBe(1);
+  });
+
   test("reloaded generating conversation resumes from its cursor and reconnects without duplicates", async () => {
     const thread = {
       id: "followup_streaming",

@@ -11,9 +11,11 @@ from fastapi.responses import StreamingResponse
 
 from backend.src.research.schemas import RunStatus
 from backend.src.services.follow_up import (
-    normalize_report_text, report_anchor_digest,
+    bounded_follow_up_history, normalize_report_text, report_anchor_digest,
 )
-from backend.src.storage import FollowUpBusyError, FollowUpNotFoundError
+from backend.src.storage import (
+    FollowUpBusyError, FollowUpNotFoundError, FollowUpNotRetryableError,
+)
 
 from .follow_up_schemas import (
     AppendFollowUpQuestion, CreateFollowUpThread, FollowUpThreadList,
@@ -104,6 +106,31 @@ async def append_follow_up_question(
             raise HTTPException(status_code=409, detail="Follow-up answer is still generating") from exc
         except FollowUpNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Follow-up thread not found") from exc
+        _start_generation(request, started)
+        return started.thread
+
+
+@router.post("/{thread_id}/messages/{message_id}/retry",
+             response_model=FollowUpThreadView, status_code=status.HTTP_202_ACCEPTED)
+async def retry_follow_up_message(
+    run_id: str, thread_id: str, message_id: int, request: Request,
+):
+    _eligible_run(request.app.state.repository, run_id)
+    lock = request.app.state.follow_up_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        try:
+            started = await asyncio.to_thread(
+                request.app.state.follow_up_repository.retry_message,
+                run_id=run_id,
+                thread_id=thread_id,
+                message_id=message_id,
+            )
+        except FollowUpBusyError as exc:
+            raise HTTPException(status_code=409, detail="Follow-up answer is still generating") from exc
+        except FollowUpNotRetryableError as exc:
+            raise HTTPException(status_code=409, detail="Follow-up answer cannot be retried") from exc
+        except FollowUpNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Follow-up message not found") from exc
         _start_generation(request, started)
         return started.thread
 
@@ -223,8 +250,9 @@ def _start_generation(request: Request, started) -> None:
 
 async def _stream_chunks(answerer, started) -> AsyncIterator[str]:
     passage = started.thread["anchor"]["text"]
+    history = bounded_follow_up_history(passage, started.history)
     if hasattr(answerer, "stream"):
-        async for chunk in answerer.stream(passage, started.history):
+        async for chunk in answerer.stream(passage, history):
             yield chunk
         return
-    yield await answerer.answer(passage, started.history)
+    yield await answerer.answer(passage, history)

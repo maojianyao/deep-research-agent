@@ -174,6 +174,16 @@ export const useResearchStore = defineStore("research", {
       this.connectFollowUpStream(thread);
       return thread;
     },
+    async retryFollowUp(messageId) {
+      if (!this.runId || !this.selectedFollowUpId) return null;
+      const thread = await api(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(this.selectedFollowUpId)}/messages/${encodeURIComponent(messageId)}/retry`,
+        { method: "POST" },
+      );
+      this.upsertFollowUp(thread);
+      this.connectFollowUpStream(thread);
+      return thread;
+    },
     selectFollowUp(threadId) {
       this.closeFollowUpStream();
       this.selectedFollowUpId = threadId;

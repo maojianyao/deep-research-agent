@@ -121,6 +121,7 @@
       :busy="followUpBusy"
       :error="followUpError"
       @submit="submitFollowUp"
+      @retry="retryFollowUp"
       @close="closeFollowUp"
     />
     <div v-if="toastMessage" class="fixed bottom-5 right-5 z-50 max-w-sm rounded border border-slate-200 bg-white px-4 py-3 text-xs shadow-xl" :class="toastError ? 'text-rose-700' : 'text-slate-700'" role="status">{{ toastMessage }}</div>
@@ -274,6 +275,19 @@ async function submitFollowUp(question) {
     } else {
       await store.appendFollowUp(question);
     }
+  } catch (error) {
+    followUpError.value = error.message;
+  } finally {
+    followUpSubmitting.value = false;
+  }
+}
+
+async function retryFollowUp(messageId) {
+  if (followUpBusy.value || !store.selectedFollowUp) return;
+  followUpSubmitting.value = true;
+  followUpError.value = "";
+  try {
+    await store.retryFollowUp(messageId);
   } catch (error) {
     followUpError.value = error.message;
   } finally {

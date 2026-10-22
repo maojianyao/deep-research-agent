@@ -34,6 +34,14 @@
             {{ messageStatus(message.status) }}
           </p>
           <p v-if="message.error_message" class="mt-1 text-[9px] text-rose-700">{{ message.error_message }}</p>
+          <button
+            v-if="message.role === 'assistant' && ['failed', 'interrupted'].includes(message.status)"
+            type="button"
+            data-retry-answer
+            class="mt-1 rounded border border-rose-200 bg-white px-2 py-1 text-[9px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+            :disabled="busy"
+            @click="$emit('retry', message.id)"
+          >重试回答</button>
         </article>
         <p v-if="!messages.length && !busy" class="text-[11px] leading-5 text-slate-400">输入一个针对所选片段的问题。</p>
         <p v-if="busy" class="text-[11px] text-teal-800" role="status">正在生成回答…</p>
@@ -76,7 +84,7 @@ const props = defineProps({
   busy: Boolean,
   error: { type: String, default: "" },
 });
-const emit = defineEmits(["submit", "close"]);
+const emit = defineEmits(["submit", "retry", "close"]);
 const input = ref(null);
 const question = ref("");
 

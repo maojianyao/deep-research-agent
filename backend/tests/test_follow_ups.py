@@ -295,6 +295,35 @@ class FollowUpApiTests(unittest.TestCase):
             [],
         )
 
+    def test_appended_question_over_limit_is_rejected_without_changing_transcript(self):
+        run = make_persisted_run("_append_limit")
+        self.app.state.repository.save_run(run)
+        detail = self.client.get(f"/api/research-runs/{run.id}").json()
+        anchor = {
+            "text": "Summary",
+            "start": 23,
+            "end": 30,
+            "prefix": "",
+            "suffix": " text",
+            "report_digest": detail["report"]["anchor_digest"],
+        }
+        created = self.client.post(
+            f"/api/research-runs/{run.id}/follow-ups",
+            json={"anchor": anchor, "question": "首个问题"},
+        ).json()
+        before = self._wait_for_completed_thread(run.id, created["id"])
+
+        response = self.client.post(
+            f"/api/research-runs/{run.id}/follow-ups/{created['id']}/questions",
+            json={"question": "问" * 2001},
+        )
+
+        self.assertEqual(response.status_code, 422, response.text)
+        after = self.client.get(
+            f"/api/research-runs/{run.id}/follow-ups/{created['id']}"
+        ).json()
+        self.assertEqual(after["messages"], before["messages"])
+
     def _wait_for_completed_thread(self, run_id, thread_id):
         import time
         deadline = time.monotonic() + 2

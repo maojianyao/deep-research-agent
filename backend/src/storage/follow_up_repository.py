@@ -20,6 +20,10 @@ class FollowUpNotFoundError(Exception):
     pass
 
 
+class FollowUpNotRetryableError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class StartedFollowUp:
     thread: dict
@@ -108,7 +112,7 @@ class FollowUpRepository:
                 {"role": item.role, "content": item.content}
                 for item in sorted(thread.messages, key=lambda item: item.sequence)
                 if item.status == "completed"
-            ][-40:]
+            ]
             session.flush()
             event_cursor = self._next_event_sequence(session, thread_id)
             thread.events.append(FollowUpEventModel(
@@ -137,6 +141,63 @@ class FollowUpRepository:
             if thread is None:
                 return None
             return self._to_dict(thread, self._thread_cursor(session, thread_id))
+
+    def retry_message(self, *, run_id: str, thread_id: str,
+                      message_id: int) -> StartedFollowUp:
+        with Session(self.engine) as session, session.begin():
+            thread = session.scalar(
+                select(FollowUpThreadModel)
+                .where(
+                    FollowUpThreadModel.id == thread_id,
+                    FollowUpThreadModel.run_id == run_id,
+                )
+                .options(selectinload(FollowUpThreadModel.messages))
+            )
+            if thread is None:
+                raise FollowUpNotFoundError
+            if any(
+                message.role == "assistant" and message.status == "generating"
+                for message in thread.messages
+            ):
+                raise FollowUpBusyError
+
+            target = next((
+                message for message in thread.messages
+                if message.id == message_id and message.role == "assistant"
+            ), None)
+            if target is None:
+                raise FollowUpNotFoundError
+            if target.status not in {"failed", "interrupted"}:
+                raise FollowUpNotRetryableError
+            original_user = next((
+                message for message in reversed(thread.messages)
+                if message.role == "user" and message.sequence < target.sequence
+            ), None)
+            if original_user is None:
+                raise FollowUpNotRetryableError
+
+            history = [
+                {"role": item.role, "content": item.content}
+                for item in sorted(thread.messages, key=lambda item: item.sequence)
+                if item.sequence < target.sequence and item.status == "completed"
+            ]
+            target.content = ""
+            target.status = "generating"
+            target.error_code = None
+            target.error_message = None
+            event_cursor = self._next_event_sequence(session, thread_id)
+            thread.events.append(FollowUpEventModel(
+                sequence=event_cursor,
+                event_type="status",
+                message_id=target.id,
+                status="generating",
+            ))
+            session.flush()
+            return StartedFollowUp(
+                thread=self._to_dict(thread, stream_cursor=event_cursor),
+                assistant_message_id=target.id,
+                history=history,
+            )
 
     def list_threads(self, run_id: str) -> list[dict]:
         query = (
