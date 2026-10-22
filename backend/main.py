@@ -68,7 +68,9 @@ def create_app(engine=None, orchestrator_factory=build_orchestrator,
     db_engine = engine or create_db_engine()
     init_db(db_engine)
     repository = ResearchRunRepository(db_engine)
+    follow_up_repository = FollowUpRepository(db_engine)
     repository.pause_interrupted_runs()
+    follow_up_repository.interrupt_generating_messages()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -92,6 +94,11 @@ def create_app(engine=None, orchestrator_factory=build_orchestrator,
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        follow_up_tasks = list(_app.state.follow_up_tasks.values())
+        for task in follow_up_tasks:
+            task.cancel()
+        if follow_up_tasks:
+            await asyncio.gather(*follow_up_tasks, return_exceptions=True)
         db_engine.dispose()
 
     application = FastAPI(
@@ -100,12 +107,14 @@ def create_app(engine=None, orchestrator_factory=build_orchestrator,
         lifespan=lifespan,
     )
     application.state.repository = repository
-    application.state.follow_up_repository = FollowUpRepository(db_engine)
+    application.state.follow_up_repository = follow_up_repository
     application.state.follow_up_answerer = follow_up_answerer_factory()
     application.state.orchestrator_factory = orchestrator_factory
     application.state.run_tasks = {}
     application.state.run_snapshots = {}
     application.state.cancel_requested = set()
+    application.state.follow_up_tasks = {}
+    application.state.follow_up_locks = {}
     origins = [origin.strip() for origin in conf.cors_origins.split(",") if origin.strip()]
     application.add_middleware(
         CORSMiddleware,

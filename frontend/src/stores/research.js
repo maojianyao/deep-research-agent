@@ -10,6 +10,7 @@ export const useResearchStore = defineStore("research", {
     runId: null, run: null, eventSequence: 0, eventSource: null, pollTimer: null,
     listTimer: null, connection: "connecting", loading: false, error: "",
     followUps: [], selectedFollowUpId: null,
+    followUpEventSource: null, followUpReconnectTimer: null, followUpStreamThreadId: null,
   }),
   getters: {
     isActive: (state) => Boolean(state.run && !terminal.has(state.run.status)),
@@ -17,6 +18,11 @@ export const useResearchStore = defineStore("research", {
     selectedFollowUp: (state) => state.followUps.find(
       (item) => item.id === state.selectedFollowUpId
     ) || null,
+    selectedFollowUpBusy: (state) => Boolean(state.followUps.find(
+      (item) => item.id === state.selectedFollowUpId
+    )?.messages.some(
+      (message) => message.role === "assistant" && message.status === "generating"
+    )),
   },
   actions: {
     async loadRuns() {
@@ -145,6 +151,7 @@ export const useResearchStore = defineStore("research", {
       if (!this.selectedFollowUpId && this.followUps.length) {
         this.selectedFollowUpId = this.followUps.at(-1).id;
       }
+      if (this.selectedFollowUp) this.connectFollowUpStream(this.selectedFollowUp);
     },
     async createFollowUp(anchor, question) {
       if (!this.runId) return null;
@@ -152,9 +159,81 @@ export const useResearchStore = defineStore("research", {
         method: "POST",
         body: JSON.stringify({ anchor, question }),
       });
-      this.followUps = [...this.followUps, thread];
+      this.upsertFollowUp(thread);
       this.selectedFollowUpId = thread.id;
+      this.connectFollowUpStream(thread);
       return thread;
+    },
+    async appendFollowUp(question) {
+      if (!this.runId || !this.selectedFollowUpId) return null;
+      const thread = await api(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(this.selectedFollowUpId)}/questions`,
+        { method: "POST", body: JSON.stringify({ question }) },
+      );
+      this.upsertFollowUp(thread);
+      this.connectFollowUpStream(thread);
+      return thread;
+    },
+    selectFollowUp(threadId) {
+      this.closeFollowUpStream();
+      this.selectedFollowUpId = threadId;
+      if (this.selectedFollowUp) this.connectFollowUpStream(this.selectedFollowUp);
+    },
+    upsertFollowUp(thread) {
+      const index = this.followUps.findIndex((item) => item.id === thread.id);
+      if (index < 0) this.followUps.push(thread);
+      else this.followUps.splice(index, 1, thread);
+    },
+    connectFollowUpStream(thread = this.selectedFollowUp) {
+      this.closeFollowUpStream();
+      if (!thread?.messages?.some(
+        (message) => message.role === "assistant" && message.status === "generating"
+      )) return;
+      this.followUpStreamThreadId = thread.id;
+      const cursor = Number(thread.stream_cursor || 0);
+      const source = markRaw(new EventSource(apiUrl(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(thread.id)}/events?after_sequence=${cursor}`
+      )));
+      this.followUpEventSource = source;
+      source.addEventListener("follow-up", (event) => this.applyFollowUpEvent(event));
+      source.onerror = () => {
+        if (this.followUpEventSource !== source) return;
+        source.close();
+        this.followUpEventSource = null;
+        const threadId = this.followUpStreamThreadId;
+        clearTimeout(this.followUpReconnectTimer);
+        this.followUpReconnectTimer = setTimeout(() => {
+          const current = this.followUps.find((item) => item.id === threadId);
+          if (current) this.connectFollowUpStream(current);
+        }, 250);
+      };
+    },
+    applyFollowUpEvent(event) {
+      try {
+        const data = JSON.parse(event.data);
+        const thread = this.followUps.find((item) => item.id === data.thread_id);
+        if (!thread || Number(data.sequence) <= Number(thread.stream_cursor || 0)) return;
+        thread.stream_cursor = Number(data.sequence);
+        const message = thread.messages.find((item) => item.id === data.message_id);
+        if (message) {
+          if (data.type === "delta") message.content = `${message.content || ""}${data.content || ""}`;
+          if (data.status) message.status = data.status;
+          if (data.error_code !== undefined) message.error_code = data.error_code;
+          if (data.error_message !== undefined) message.error_message = data.error_message;
+        }
+        if (["completed", "failed", "interrupted"].includes(data.type)) {
+          this.closeFollowUpStream();
+        }
+      } catch {
+        this.error = "追问流数据格式无效";
+      }
+    },
+    closeFollowUpStream() {
+      this.followUpEventSource?.close();
+      this.followUpEventSource = null;
+      this.followUpStreamThreadId = null;
+      clearTimeout(this.followUpReconnectTimer);
+      this.followUpReconnectTimer = null;
     },
     selectStatus(value) { this.statusFilter = value; this.page = 1; this.loadRuns(); },
     selectPage(value) { this.page = value; this.loadRuns(); },
@@ -165,6 +244,7 @@ export const useResearchStore = defineStore("research", {
       this.eventSequence = 0;
       this.followUps = [];
       this.selectedFollowUpId = null;
+      this.closeFollowUpStream();
       this.connection = "online";
     },
   },

@@ -8,6 +8,30 @@ import ReportView from "./ReportView.vue";
 import { useResearchStore } from "../stores/research";
 
 
+class FakeEventSource {
+  static instances = [];
+
+  constructor(url) {
+    this.url = url;
+    this.listeners = new Map();
+    this.closed = false;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type, data) {
+    this.listeners.get(type)?.({ data: JSON.stringify(data) });
+  }
+}
+
+
 function completedRun() {
   return {
     id: "run_followup",
@@ -68,6 +92,8 @@ afterEach(() => {
 describe("report follow-up DOM", () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    globalThis.EventSource = FakeEventSource;
+    FakeEventSource.instances = [];
   });
 
   test("selecting completed report prose reveals 提问 and opens a focused side panel", async () => {
@@ -153,7 +179,6 @@ describe("report follow-up DOM", () => {
 
   test("submitting a first question renders the persisted assistant answer", async () => {
     const { wrapper } = mountCompletedReport();
-    const answer = "**已收到**：这段内容说明证据。";
     let request;
     globalThis.fetch.mockImplementation(async (url, options) => {
       request = { url, body: JSON.parse(options.body) };
@@ -171,11 +196,12 @@ describe("report follow-up DOM", () => {
               created_at: "2026-10-22T10:01:00",
             },
             {
-              id: 2, role: "assistant", sequence: 2, content: answer,
-              status: "completed", error_code: null, error_message: null,
+              id: 2, role: "assistant", sequence: 2, content: "",
+              status: "generating", error_code: null, error_message: null,
               created_at: "2026-10-22T10:01:01",
             },
           ],
+          stream_cursor: 1,
           created_at: "2026-10-22T10:01:00",
           updated_at: "2026-10-22T10:01:01",
         }),
@@ -204,8 +230,31 @@ describe("report follow-up DOM", () => {
       suffix: "(evidence_abc123).",
     });
     expect(panel.text()).toContain("这段说明了什么？");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toContain("after_sequence=1");
+
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: "followup_new",
+      sequence: 2,
+      type: "delta",
+      message_id: 2,
+      content: "**已收到**：这段内容说明证据。",
+      status: "generating",
+    });
+    await nextTick();
     expect(panel.find("strong").text()).toBe("已收到");
     expect(panel.find("script").exists()).toBe(false);
+
+    FakeEventSource.instances[0].emit("follow-up", {
+      thread_id: "followup_new",
+      sequence: 3,
+      type: "completed",
+      message_id: 2,
+      content: "",
+      status: "completed",
+    });
+    await nextTick();
+    expect(FakeEventSource.instances[0].closed).toBe(true);
   });
 
   test("restored conversation displays safe Markdown answers and blocks unsafe HTML", async () => {
@@ -245,5 +294,97 @@ describe("report follow-up DOM", () => {
     expect(panel.find("script").exists()).toBe(false);
     expect(panel.text()).not.toContain("alert('xss')");
     expect(document.activeElement).toBe(panel.find("[data-follow-up-input]").element);
+  });
+
+  test("reloaded generating conversation resumes from its cursor and reconnects without duplicates", async () => {
+    const thread = {
+      id: "followup_streaming",
+      run_id: "run_followup",
+      anchor: {
+        text: "Summary text",
+        start: 0,
+        end: 12,
+        prefix: "",
+        suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        {
+          id: 1, role: "user", sequence: 1, content: "请继续解释。",
+          status: "completed", error_code: null, error_message: null,
+          created_at: "2026-10-22T10:01:00",
+        },
+        {
+          id: 2, role: "assistant", sequence: 2, content: "第一段",
+          status: "generating", error_code: null, error_message: null,
+          created_at: "2026-10-22T10:01:01",
+        },
+      ],
+      stream_cursor: 2,
+      created_at: "2026-10-22T10:01:00",
+      updated_at: "2026-10-22T10:01:01",
+    };
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useResearchStore();
+    store.loadRuns = vi.fn();
+    globalThis.fetch.mockImplementation(async (url) => {
+      if (url === "/api/research-runs/run_followup") {
+        return { ok: true, status: 200, json: async () => completedRun() };
+      }
+      if (url === "/api/research-runs/run_followup/follow-ups") {
+        return { ok: true, status: 200, json: async () => ({ items: [thread] }) };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+
+    await store.openRun("run_followup");
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [pinia] },
+    });
+    await nextTick();
+
+    const panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.text()).toContain("第一段");
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toContain("after_sequence=2");
+
+    const firstSource = FakeEventSource.instances[0];
+    firstSource.emit("follow-up", {
+      thread_id: thread.id,
+      sequence: 3,
+      type: "delta",
+      message_id: 2,
+      content: "，第二段",
+      status: "generating",
+    });
+    await nextTick();
+    expect(panel.text().split("第一段").length - 1).toBe(1);
+    expect(panel.text()).toContain("第一段，第二段");
+
+    vi.useFakeTimers();
+    try {
+      firstSource.onerror();
+      vi.advanceTimersByTime(1000);
+      await flushPromises();
+      expect(FakeEventSource.instances).toHaveLength(2);
+      expect(FakeEventSource.instances[1].url).toContain("after_sequence=3");
+
+      FakeEventSource.instances[1].emit("follow-up", {
+        thread_id: thread.id,
+        sequence: 4,
+        type: "completed",
+        message_id: 2,
+        content: "",
+        status: "completed",
+      });
+      await nextTick();
+      expect(FakeEventSource.instances[1].closed).toBe(true);
+      expect(panel.text().split("第一段").length - 1).toBe(1);
+      expect(panel.text()).toContain("第一段，第二段");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

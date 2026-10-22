@@ -144,7 +144,7 @@ const findingStatement = ref("");
 const citationLoading = ref(false);
 const pendingFollowUp = ref(null);
 const followUpOpen = ref(false);
-const followUpBusy = ref(false);
+const followUpSubmitting = ref(false);
 const followUpError = ref("");
 const windowWidth = ref(window.innerWidth);
 const windowHeight = ref(window.innerHeight);
@@ -161,6 +161,7 @@ const completedCount = computed(() => store.runs.filter((item) => item.status ==
 const reviewCount = computed(() => store.runs.filter((item) => item.status === "needs_human_review").length);
 const completedTasks = computed(() => store.run?.plan?.tasks?.filter((task) => task.completed).length || 0);
 const runError = computed(() => store.run?.error || "");
+const followUpBusy = computed(() => followUpSubmitting.value || store.selectedFollowUpBusy);
 const progress = computed(() => {
   const run = store.run;
   if (!run) return 0;
@@ -243,6 +244,7 @@ async function showCitation(referenceId) {
 }
 
 function openFollowUpSelection(selection) {
+  store.closeFollowUpStream();
   pendingFollowUp.value = selection;
   followUpOpen.value = false;
   followUpError.value = "";
@@ -262,20 +264,25 @@ function openFollowUpPanel() {
 }
 
 async function submitFollowUp(question) {
-  if (!pendingFollowUp.value || followUpBusy.value) return;
-  followUpBusy.value = true;
+  if ((!pendingFollowUp.value && !store.selectedFollowUp) || followUpBusy.value) return;
+  followUpSubmitting.value = true;
   followUpError.value = "";
   try {
-    await store.createFollowUp(pendingFollowUp.value.anchor, question);
-    pendingFollowUp.value = null;
+    if (pendingFollowUp.value) {
+      await store.createFollowUp(pendingFollowUp.value.anchor, question);
+      pendingFollowUp.value = null;
+    } else {
+      await store.appendFollowUp(question);
+    }
   } catch (error) {
     followUpError.value = error.message;
   } finally {
-    followUpBusy.value = false;
+    followUpSubmitting.value = false;
   }
 }
 
 function closeFollowUp() {
+  store.closeFollowUpStream();
   pendingFollowUp.value = null;
   followUpOpen.value = false;
   store.selectedFollowUpId = null;

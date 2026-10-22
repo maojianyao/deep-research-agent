@@ -25,6 +25,15 @@
           </p>
           <p v-if="message.role === 'user'" class="whitespace-pre-wrap break-words rounded bg-slate-50 px-3 py-2 text-slate-700">{{ message.content }}</p>
           <div v-else class="markdown-content break-words text-slate-700" v-html="safeMarkdown(message.content)"></div>
+          <p
+            v-if="message.role === 'assistant' && message.status !== 'completed'"
+            data-message-status
+            class="mt-1 text-[9px]"
+            :class="message.status === 'generating' ? 'text-teal-700' : 'text-rose-700'"
+          >
+            {{ messageStatus(message.status) }}
+          </p>
+          <p v-if="message.error_message" class="mt-1 text-[9px] text-rose-700">{{ message.error_message }}</p>
         </article>
         <p v-if="!messages.length && !busy" class="text-[11px] leading-5 text-slate-400">输入一个针对所选片段的问题。</p>
         <p v-if="busy" class="text-[11px] text-teal-800" role="status">正在生成回答…</p>
@@ -79,6 +88,14 @@ function submit() {
   const value = question.value.trim();
   if (!value || props.busy) return;
   emit("submit", value);
+}
+
+function messageStatus(status) {
+  return {
+    generating: "正在生成，可离开页面稍后回来",
+    failed: "生成失败，已保留收到的内容",
+    interrupted: "生成被中断，已保留收到的内容",
+  }[status] || status;
 }
 
 watch(() => props.busy, (busy) => {

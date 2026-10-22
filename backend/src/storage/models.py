@@ -298,6 +298,10 @@ class FollowUpThreadModel(Base):
         back_populates="thread", cascade="all, delete-orphan",
         order_by="FollowUpMessageModel.sequence",
     )
+    events: Mapped[list["FollowUpEventModel"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan",
+        order_by="FollowUpEventModel.sequence",
+    )
 
 
 class FollowUpMessageModel(Base):
@@ -319,3 +323,27 @@ class FollowUpMessageModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     thread: Mapped[FollowUpThreadModel] = relationship(back_populates="messages")
+
+
+class FollowUpEventModel(Base):
+    __tablename__ = "follow_up_events"
+    __table_args__ = (
+        UniqueConstraint("thread_id", "sequence", name="uq_follow_up_event_sequence"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("follow_up_threads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("follow_up_messages.id", ondelete="CASCADE"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str | None] = mapped_column(String(20))
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    thread: Mapped[FollowUpThreadModel] = relationship(back_populates="events")

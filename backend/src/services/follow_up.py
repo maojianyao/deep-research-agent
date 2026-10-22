@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from hashlib import sha256
 from typing import Protocol
 
@@ -19,6 +19,18 @@ FOLLOW_UP_SYSTEM_PROMPT = """你是研究报告的追问助手。
 class FollowUpAnswerer(Protocol):
     async def answer(self, passage: str, history: Sequence[dict]) -> str:
         ...
+
+    def stream(self, passage: str, history: Sequence[dict]) -> AsyncIterator[str]:
+        ...
+
+
+def _content_text(content) -> str:
+    if isinstance(content, list):
+        return "".join(
+            str(item.get("text", "")) if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    return str(content)
 
 
 def _is_table_separator(line: str) -> bool:
@@ -67,13 +79,17 @@ class LLMFollowUpAnswerer:
             *((item["role"], item["content"]) for item in history),
         ]
         result = await self.llm.ainvoke(messages)
-        content = getattr(result, "content", result)
-        if isinstance(content, list):
-            return "".join(
-                str(item.get("text", "")) if isinstance(item, dict) else str(item)
-                for item in content
-            ).strip()
-        return str(content).strip()
+        return _content_text(getattr(result, "content", result)).strip()
+
+    async def stream(self, passage: str, history: Sequence[dict]) -> AsyncIterator[str]:
+        messages = [
+            ("system", f"{FOLLOW_UP_SYSTEM_PROMPT}\n<selected_passage>\n{passage}\n</selected_passage>"),
+            *((item["role"], item["content"]) for item in history),
+        ]
+        async for chunk in self.llm.astream(messages):
+            text = _content_text(getattr(chunk, "content", chunk))
+            if text:
+                yield text
 
 
 class LazyFollowUpAnswerer:
@@ -87,3 +103,9 @@ class LazyFollowUpAnswerer:
         if self.answerer is None:
             self.answerer = self.factory()
         return await self.answerer.answer(passage, history)
+
+    async def stream(self, passage: str, history: Sequence[dict]) -> AsyncIterator[str]:
+        if self.answerer is None:
+            self.answerer = self.factory()
+        async for chunk in self.answerer.stream(passage, history):
+            yield chunk

@@ -20,6 +20,10 @@ class CreateFollowUpThread(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
+class AppendFollowUpQuestion(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+
+
 class FollowUpMessageView(BaseModel):
     id: int
     role: Literal["user", "assistant"]
@@ -36,6 +40,7 @@ class FollowUpThreadView(BaseModel):
     run_id: str
     anchor: ReportSelectionAnchor
     messages: list[FollowUpMessageView]
+    stream_cursor: int
     created_at: datetime
     updated_at: datetime
 

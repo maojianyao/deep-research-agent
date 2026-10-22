@@ -23,6 +23,10 @@ class FakeAnswerer:
         self.calls.append((passage, history))
         return "**重点**：选区讨论的是报告摘要。"
 
+    async def stream(self, passage, history):
+        self.calls.append((passage, history))
+        yield "**重点**：选区讨论的是报告摘要。"
+
 
 class FollowUpApiTests(unittest.TestCase):
     def setUp(self):
@@ -36,6 +40,8 @@ class FollowUpApiTests(unittest.TestCase):
             follow_up_answerer_factory=lambda: self.answerer,
         )
         self.client = TestClient(self.app)
+        self.client.__enter__()
+        self.addCleanup(self.client.__exit__, None, None, None)
 
     def test_first_question_persists_thread_anchor_and_messages_across_app_recreation(self):
         run = make_persisted_run()
@@ -58,6 +64,7 @@ class FollowUpApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
         thread = response.json()
         self.assertEqual(thread["anchor"], anchor)
+        thread = self._wait_for_completed_thread(run.id, thread["id"])
         self.assertEqual(
             [(item["role"], item["content"], item["status"]) for item in thread["messages"]],
             [
@@ -287,6 +294,18 @@ class FollowUpApiTests(unittest.TestCase):
             self.app.state.follow_up_repository.list_threads(run.id),
             [],
         )
+
+    def _wait_for_completed_thread(self, run_id, thread_id):
+        import time
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            thread = self.client.get(
+                f"/api/research-runs/{run_id}/follow-ups/{thread_id}"
+            ).json()
+            if thread["messages"][-1]["status"] == "completed":
+                return thread
+            time.sleep(0.02)
+        self.fail("follow-up generation did not complete")
 
 
 if __name__ == "__main__":
