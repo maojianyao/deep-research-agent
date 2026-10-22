@@ -119,6 +119,7 @@ class ReportBlockView(BaseModel):
 class ReportView(BaseModel):
     title: str
     markdown: str
+    anchor_digest: str
     blocks: list[ReportBlockView]
 
 

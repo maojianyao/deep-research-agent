@@ -8,9 +8,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.src.api.follow_ups import router as follow_up_router
 from backend.src.api.research import router as research_router
 from backend.src.config import get_config
-from backend.src.storage import ResearchRunRepository, create_db_engine, init_db
+from backend.src.services.follow_up import LazyFollowUpAnswerer, LLMFollowUpAnswerer
+from backend.src.storage import (
+    FollowUpRepository, ResearchRunRepository, create_db_engine, init_db,
+)
 from backend.src.utils.logger import get_logger
 
 conf = get_config()
@@ -54,7 +58,13 @@ def build_orchestrator(repository: ResearchRunRepository):
     return orchestrator
 
 
-def create_app(engine=None, orchestrator_factory=build_orchestrator) -> FastAPI:
+def build_follow_up_answerer():
+    from backend.src.services.llm import get_llm
+    return LazyFollowUpAnswerer(lambda: LLMFollowUpAnswerer(get_llm()))
+
+
+def create_app(engine=None, orchestrator_factory=build_orchestrator,
+               follow_up_answerer_factory=build_follow_up_answerer) -> FastAPI:
     db_engine = engine or create_db_engine()
     init_db(db_engine)
     repository = ResearchRunRepository(db_engine)
@@ -90,6 +100,8 @@ def create_app(engine=None, orchestrator_factory=build_orchestrator) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.repository = repository
+    application.state.follow_up_repository = FollowUpRepository(db_engine)
+    application.state.follow_up_answerer = follow_up_answerer_factory()
     application.state.orchestrator_factory = orchestrator_factory
     application.state.run_tasks = {}
     application.state.run_snapshots = {}
@@ -103,6 +115,7 @@ def create_app(engine=None, orchestrator_factory=build_orchestrator) -> FastAPI:
         allow_headers=["Authorization", "Content-Type"],
     )
     application.include_router(research_router)
+    application.include_router(follow_up_router)
 
     @application.get("/api/health", tags=["system"])
     def health():

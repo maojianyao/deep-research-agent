@@ -62,7 +62,7 @@
               <div class="grid min-w-0 gap-4">
                 <section class="rounded-md border border-slate-200 bg-white">
                   <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3"><h2 class="text-xs font-semibold">研究报告</h2><span class="text-[10px] text-slate-400">引用编号可点击查看来源</span></div>
-                  <div class="p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" @citation="showCitation" /></div>
+                  <div class="p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" /></div>
                 </section>
 
                 <details class="overflow-hidden rounded-md border border-slate-200 bg-white">
@@ -105,6 +105,24 @@
     </dialog>
 
     <CitationDialog ref="citationDialog" :sources="citationSources" :finding-statement="findingStatement" :loading="citationLoading" />
+    <button
+      v-if="pendingFollowUp"
+      data-follow-up-trigger
+      type="button"
+      class="fixed z-30 rounded bg-amber-600 px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-lg hover:bg-amber-700"
+      :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y + 8, windowHeight - 44))}px` }"
+      @mousedown.prevent
+      @click="openFollowUpPanel"
+    >提问</button>
+    <FollowUpPanel
+      v-if="followUpOpen || store.selectedFollowUp"
+      :passage="pendingFollowUp?.anchor.text || store.selectedFollowUp?.anchor.text || ''"
+      :messages="store.selectedFollowUp?.messages || []"
+      :busy="followUpBusy"
+      :error="followUpError"
+      @submit="submitFollowUp"
+      @close="closeFollowUp"
+    />
     <div v-if="toastMessage" class="fixed bottom-5 right-5 z-50 max-w-sm rounded border border-slate-200 bg-white px-4 py-3 text-xs shadow-xl" :class="toastError ? 'text-rose-700' : 'text-slate-700'" role="status">{{ toastMessage }}</div>
   </div>
 </template>
@@ -116,6 +134,7 @@ import WorkflowDiagram from "./components/WorkflowDiagram.vue";
 import ResearchList from "./components/ResearchList.vue";
 import ReportView from "./components/ReportView.vue";
 import CitationDialog from "./components/CitationDialog.vue";
+import FollowUpPanel from "./components/FollowUpPanel.vue";
 
 const store = useResearchStore();
 const createDialog = ref(null);
@@ -123,6 +142,12 @@ const citationDialog = ref(null);
 const citationSources = ref([]);
 const findingStatement = ref("");
 const citationLoading = ref(false);
+const pendingFollowUp = ref(null);
+const followUpOpen = ref(false);
+const followUpBusy = ref(false);
+const followUpError = ref("");
+const windowWidth = ref(window.innerWidth);
+const windowHeight = ref(window.innerHeight);
 const topic = ref("");
 const iterations = ref(3);
 const creating = ref(false);
@@ -217,6 +242,58 @@ async function showCitation(referenceId) {
   finally { citationLoading.value = false; }
 }
 
-onMounted(() => store.loadRuns());
-onUnmounted(() => { store.clearRun(); clearTimeout(toastTimer); });
+function openFollowUpSelection(selection) {
+  pendingFollowUp.value = selection;
+  followUpOpen.value = false;
+  followUpError.value = "";
+  if (selection) store.selectedFollowUpId = null;
+}
+
+function openFollowUpPanel() {
+  if (!pendingFollowUp.value) return;
+  followUpOpen.value = true;
+  pendingFollowUp.value = {
+    ...pendingFollowUp.value,
+    anchor: {
+      ...pendingFollowUp.value.anchor,
+      report_digest: store.run?.report?.anchor_digest || "",
+    },
+  };
+}
+
+async function submitFollowUp(question) {
+  if (!pendingFollowUp.value || followUpBusy.value) return;
+  followUpBusy.value = true;
+  followUpError.value = "";
+  try {
+    await store.createFollowUp(pendingFollowUp.value.anchor, question);
+    pendingFollowUp.value = null;
+  } catch (error) {
+    followUpError.value = error.message;
+  } finally {
+    followUpBusy.value = false;
+  }
+}
+
+function closeFollowUp() {
+  pendingFollowUp.value = null;
+  followUpOpen.value = false;
+  store.selectedFollowUpId = null;
+  followUpError.value = "";
+}
+
+function updateViewport() {
+  windowWidth.value = window.innerWidth;
+  windowHeight.value = window.innerHeight;
+}
+
+onMounted(() => {
+  store.loadRuns();
+  window.addEventListener("resize", updateViewport);
+});
+onUnmounted(() => {
+  store.clearRun();
+  clearTimeout(toastTimer);
+  window.removeEventListener("resize", updateViewport);
+});
 </script>

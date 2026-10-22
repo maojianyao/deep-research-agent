@@ -9,10 +9,14 @@ export const useResearchStore = defineStore("research", {
     runs: [], total: 0, page: 1, pageSize: 20, search: "", statusFilter: "",
     runId: null, run: null, eventSequence: 0, eventSource: null, pollTimer: null,
     listTimer: null, connection: "connecting", loading: false, error: "",
+    followUps: [], selectedFollowUpId: null,
   }),
   getters: {
     isActive: (state) => Boolean(state.run && !terminal.has(state.run.status)),
     pageCount: (state) => Math.max(1, Math.ceil(state.total / state.pageSize)),
+    selectedFollowUp: (state) => state.followUps.find(
+      (item) => item.id === state.selectedFollowUpId
+    ) || null,
   },
   actions: {
     async loadRuns() {
@@ -43,7 +47,10 @@ export const useResearchStore = defineStore("research", {
       this.runId = runId;
       this.run = null;
       this.eventSequence = 0;
+      this.followUps = [];
+      this.selectedFollowUpId = null;
       await this.refreshRun();
+      if (this.run?.status === "completed" && this.run.report) await this.loadFollowUps();
       if (this.isActive) this.connectSse();
     },
     async refreshRun() {
@@ -131,6 +138,24 @@ export const useResearchStore = defineStore("research", {
       if (!this.runId) return null;
       return api(`/research-runs/${encodeURIComponent(this.runId)}/references/${encodeURIComponent(referenceId)}`);
     },
+    async loadFollowUps() {
+      if (!this.runId) return;
+      const data = await api(`/research-runs/${encodeURIComponent(this.runId)}/follow-ups`);
+      this.followUps = data.items;
+      if (!this.selectedFollowUpId && this.followUps.length) {
+        this.selectedFollowUpId = this.followUps.at(-1).id;
+      }
+    },
+    async createFollowUp(anchor, question) {
+      if (!this.runId) return null;
+      const thread = await api(`/research-runs/${encodeURIComponent(this.runId)}/follow-ups`, {
+        method: "POST",
+        body: JSON.stringify({ anchor, question }),
+      });
+      this.followUps = [...this.followUps, thread];
+      this.selectedFollowUpId = thread.id;
+      return thread;
+    },
     selectStatus(value) { this.statusFilter = value; this.page = 1; this.loadRuns(); },
     selectPage(value) { this.page = value; this.loadRuns(); },
     clearRun() {
@@ -138,6 +163,8 @@ export const useResearchStore = defineStore("research", {
       this.runId = null;
       this.run = null;
       this.eventSequence = 0;
+      this.followUps = [];
+      this.selectedFollowUpId = null;
       this.connection = "online";
     },
   },

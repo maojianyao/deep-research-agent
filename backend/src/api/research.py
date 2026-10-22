@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.responses import StreamingResponse
 
 from backend.src.research.schemas import ResearchRun, RunStatus
+from backend.src.services.follow_up import report_anchor_digest
 from backend.src.storage.repository import ResearchRunRepository
 from backend.src.utils.logger import get_logger
 from .schemas import (
@@ -191,6 +192,7 @@ def _detail(model) -> dict:
         "report": None if model.report is None else {
             "title": model.report.title,
             "markdown": model.report.markdown,
+            "anchor_digest": report_anchor_digest(model.report.markdown),
             "blocks": [{
                 "heading": block.heading,
                 "text": block.text,
