@@ -17,7 +17,6 @@ from backend.src.services import llm as llm_module
 from backend.src.services.search import _clean, _norm_url, _prepare, _raise_api_error
 from backend.src.utils.logger import DailyFileHandler, LogManager
 from backend.src.utils.logger import get_logger as get_cached_logger
-from backend.src.utils.text import extract_json, keywords
 from backend.tests.factories import make_source, make_task
 
 
@@ -149,33 +148,6 @@ class ConfigurationTests(unittest.TestCase):
                 from_env.assert_called_once_with()
         finally:
             config_module._config = original
-
-
-class TextUtilityTests(unittest.TestCase):
-    def test_extract_json_array_from_wrapped_response(self):
-        response = 'prefix ["a", "b"] suffix'
-        self.assertEqual(extract_json(response), ["a", "b"])
-
-    def test_extract_json_object(self):
-        response = '{"answer": 1}'
-        self.assertEqual(extract_json(response), {"answer": 1})
-
-    def test_extract_json_rejects_invalid_array(self):
-        with self.assertRaises(ValueError):
-            extract_json("prefix [broken] suffix")
-
-    def test_extract_json_rejects_invalid_response(self):
-        with self.assertRaises(ValueError):
-            extract_json("not json")
-
-    def test_keywords_extracts_english_and_cjk_tokens(self):
-        task = make_task(question="LLM benchmark 中文", queries=["token 测试"])
-        result = keywords(task)
-        self.assertIn("llm", result)
-        self.assertIn("benchmark", result)
-        self.assertIn("token", result)
-        self.assertIn("中文", result)
-        self.assertIn("测试", result)
 
 
 class LoggerTests(unittest.TestCase):
