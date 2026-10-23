@@ -262,6 +262,14 @@ dialog::backdrop { background: rgb(15 23 42 / .5); backdrop-filter: blur(2px); }
 .status-pill.is-muted { color: #71827f; }
 
 .run-dossier { display: grid; gap: 24px; }
+.run-load-state {
+  border-top: 1px solid var(--line);
+  padding: 64px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+.run-load-state strong { color: var(--ink-strong); font-family: var(--font-reading); font-size: 18px; }
+.run-load-state p { margin: 8px 0 0; font-size: 13px; }
 .dossier-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line-strong); padding-bottom: 24px; }
 .run-kicker { margin: 0; color: var(--moss); font-size: 11px; }
 .run-kicker span { margin-left: 8px; color: #81908c; }

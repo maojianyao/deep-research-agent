@@ -57,17 +57,22 @@ export const useResearchStore = defineStore("research", {
       this.eventSequence = 0;
       this.followUps = [];
       this.selectedFollowUpId = null;
-      await this.refreshRun();
+      const error = await this.refreshRun();
       if (this.run?.status === "completed" && this.run.report) await this.loadFollowUps();
       if (this.isActive) this.connectSse();
+      return error;
     },
     async refreshRun() {
-      if (!this.runId) return;
+      if (!this.runId) return null;
       try {
         this.run = await api(`/research-runs/${encodeURIComponent(this.runId)}`);
         const latest = Math.max(0, ...(this.run.events || []).map((event) => event.sequence));
         this.eventSequence = Math.max(this.eventSequence, latest);
-      } catch (error) { this.error = error.message; }
+        return null;
+      } catch (error) {
+        this.error = error.message;
+        return error.message;
+      }
     },
     connectSse() {
       if (!this.runId || !this.isActive) return;

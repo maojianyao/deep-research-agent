@@ -53,7 +53,14 @@
 
         <section v-else class="run-dossier">
           <button class="w-fit text-xs text-[var(--moss)] hover:underline" @click="backToList">← 返回研究任务</button>
-          <div v-if="!store.run" class="border-t border-[var(--line)] py-16 text-center text-sm text-[var(--muted)]">{{ store.error || "正在读取研究详情…" }}</div>
+          <div v-if="!store.run" class="run-load-state" :role="runLoading ? 'status' : 'alert'">
+            <strong>{{ runLoading ? "正在读取研究档案" : runErrorMessage }}</strong>
+            <p v-if="runLoading">正在加载计划、来源与报告。</p>
+            <div v-if="!runLoading" class="mt-4 flex justify-center gap-2">
+              <button class="secondary-action" @click="retryCurrentRun">重新读取</button>
+              <button class="secondary-action" @click="backToList">返回研究任务</button>
+            </div>
+          </div>
           <template v-else>
             <div class="dossier-header">
               <div class="min-w-0">
@@ -225,6 +232,8 @@ const reportLanguage = ref("");
 const reportOpen = ref(false);
 const iterations = ref(3);
 const creating = ref(false);
+const runLoading = ref(false);
+const runLoadError = ref("");
 const toastMessage = ref("");
 const toastError = ref(false);
 let toastTimer;
@@ -242,6 +251,13 @@ const reportLanguages = [
 ];
 
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
+const runErrorMessage = computed(() => {
+  const message = runLoadError.value || store.error;
+  if (/not found/i.test(message || "")) {
+    return "找不到这份研究档案。它可能已经被删除。";
+  }
+  return message || "无法读取研究档案。";
+});
 const completedTasks = computed(() => store.run?.plan?.tasks?.filter((task) => task.completed).length || 0);
 const runError = computed(() => store.run?.error || "");
 const followUpBusy = computed(() => followUpSubmitting.value || store.selectedFollowUpBusy);
@@ -273,13 +289,58 @@ function notify(message, error = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toastMessage.value = ""; }, 3000);
 }
-async function openRun(id) { await store.openRun(id); }
-async function backToList() { store.clearRun(); await store.loadRuns(); }
+function runLocation(id = null) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("run", id);
+  else url.searchParams.delete("run");
+  url.hash = "";
+  return `${url.pathname}${url.search}`;
+}
+function syncRunUrl(id, mode = "push") {
+  const target = runLocation(id);
+  if (`${window.location.pathname}${window.location.search}` === target) return;
+  window.history[mode === "replace" ? "replaceState" : "pushState"]({ runId: id }, "", target);
+}
+async function loadRunFromRoute(id) {
+  runLoading.value = true;
+  runLoadError.value = "";
+  try {
+    const error = await store.openRun(id);
+    if (!store.run) {
+      runLoadError.value = error || store.error || "无法读取研究档案。";
+    }
+  } finally {
+    runLoading.value = false;
+  }
+}
+async function openRun(id) {
+  syncRunUrl(id);
+  await loadRunFromRoute(id);
+}
+async function backToList() {
+  syncRunUrl(null);
+  store.clearRun();
+  await store.loadRuns();
+}
+async function retryCurrentRun() {
+  const id = new URLSearchParams(window.location.search).get("run");
+  if (id) await loadRunFromRoute(id);
+}
+async function handlePopState() {
+  const id = new URLSearchParams(window.location.search).get("run");
+  if (!id) {
+    store.clearRun();
+    await store.loadRuns();
+    return;
+  }
+  if (id !== store.runId || !store.run) await loadRunFromRoute(id);
+}
 async function submitResearch() {
   if (!topic.value.trim()) return;
   creating.value = true;
   try {
-    await store.createRun(topic.value.trim(), iterations.value, reportLanguage.value);
+    const result = await store.createRun(topic.value.trim(), iterations.value, reportLanguage.value);
+    syncRunUrl(result.id, "replace");
     topic.value = "";
     reportLanguage.value = "";
     closeCreateDialog();
@@ -295,14 +356,14 @@ async function runAction(action) {
 }
 async function finishRun(run) {
   if (!window.confirm(`结束研究主题“${run.user_request}”？已保存的进度会保留，但结束后不能继续。`)) return;
-  if (store.runId !== run.id) await store.openRun(run.id);
+  if (store.runId !== run.id) await openRun(run.id);
   try {
     await store.runAction("cancel");
     notify("研究任务已结束");
   } catch (error) { notify(error.message, true); }
 }
 async function continueRun(run) {
-  if (store.runId !== run.id) await store.openRun(run.id);
+  if (store.runId !== run.id) await openRun(run.id);
   try {
     await store.runAction("resume");
     notify("研究任务已从保存的进度继续");
@@ -452,14 +513,21 @@ watch(() => store.runId, () => {
   reportOpen.value = false;
   clearReportInteraction();
 });
+watch(() => store.run?.report, (report) => {
+  if (report) reportOpen.value = true;
+}, { immediate: true });
 
 onMounted(() => {
   store.loadRuns();
+  const initialRunId = new URLSearchParams(window.location.search).get("run");
+  if (initialRunId) loadRunFromRoute(initialRunId);
   window.addEventListener("resize", updateViewport);
+  window.addEventListener("popstate", handlePopState);
 });
 onUnmounted(() => {
   store.clearRun();
   clearTimeout(toastTimer);
   window.removeEventListener("resize", updateViewport);
+  window.removeEventListener("popstate", handlePopState);
 });
 </script>
