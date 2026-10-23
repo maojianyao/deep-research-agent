@@ -70,11 +70,12 @@ class PlannerAgentTests(unittest.IsolatedAsyncioTestCase):
             tasks=[ResearchTaskDraft(question="Task")],
         )
         with patch("backend.src.research.agents.planner._ainvoke", AsyncMock(return_value=draft)) as invoke:
-            plan = await planner.run("Request")
+            plan = await planner.run("Request", report_language="ja")
 
         self.assertEqual(plan.research_question, "Question")
         self.assertEqual(len(plan.tasks), 1)
         self.assertEqual(invoke.await_args.args[2], "Request")
+        self.assertEqual(invoke.await_args.args[1].report_language, "ja")
 
     async def test_run_supplement_builds_payload_and_returns_new_tasks(self):
         planner = object.__new__(PlannerAgent)
@@ -107,6 +108,17 @@ class ResearcherAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("test", tokens)
         self.assertIn("中文", tokens)
         self.assertIn("问题", tokens)
+
+    def test_keywords_supports_non_cjk_unicode_languages(self):
+        task = make_task(
+            question="تحليل politiques énergétiques",
+            queries=["energía renovable", "エネルギー政策"],
+        )
+        tokens = ResearcherAgent._keywords(task)
+        self.assertIn("تحليل", tokens)
+        self.assertIn("energía", tokens)
+        self.assertIn("renovable", tokens)
+        self.assertIn("エネルギー政策", tokens)
 
     def test_relevance_weights_title_more_than_content(self):
         tokens = {"example"}
@@ -357,6 +369,7 @@ class CriticAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["findings"][0]["id"], "finding_1")
         self.assertEqual(payload["research_plan"]["research_question"], plan.research_question)
         self.assertEqual(payload["research_plan"]["tasks"][0]["id"], plan.tasks[0].id)
+        self.assertEqual(invoke.await_args.args[1].report_language, "zh-CN")
 
 
 class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
@@ -467,10 +480,19 @@ class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_write_summary_invokes_summary_agent(self):
         writer = make_writer()
         summary = make_summary()
-        with patch("backend.src.research.agents.writer._ainvoke", AsyncMock(return_value=summary)):
-            result = await writer.write_summary(make_outline(), [make_section()])
+        plan = make_plan(research_domains=["医疗"], risk_level="high")
+        with patch(
+            "backend.src.research.agents.writer._ainvoke",
+            AsyncMock(return_value=summary),
+        ) as invoke:
+            result = await writer.write_summary(
+                make_outline(), [make_section()], plan=plan
+            )
 
         self.assertIs(result, summary)
+        payload = json.loads(invoke.await_args.args[2])
+        self.assertEqual(payload["research_profile"]["risk_level"], "high")
+        self.assertEqual(payload["research_profile"]["domains"], ["医疗"])
 
     async def test_run_orchestrates_three_stages(self):
         writer = make_writer()
@@ -506,6 +528,24 @@ class WriterAgentTests(unittest.IsolatedAsyncioTestCase):
         summary = make_summary(limitations=None)
         report = WriterAgent.assemble(outline, [make_section()], summary)
         self.assertEqual(report.blocks[-1].heading, "结论与建议")
+
+    def test_assemble_uses_model_generated_localized_headings(self):
+        outline = make_outline(title="Rapport")
+        sections = [make_section(heading="Analyse")]
+        summary = make_summary(
+            executive_summary_heading="Résumé exécutif",
+            conclusion_heading="Conclusion",
+            limitations_heading="Limites",
+            reference_heading="Références",
+        )
+
+        report = WriterAgent.assemble(outline, sections, summary, "fr")
+
+        self.assertEqual(report.report_language, "fr")
+        self.assertEqual(report.reference_heading, "Références")
+        self.assertEqual(report.blocks[0].heading, "Résumé exécutif")
+        self.assertEqual(report.blocks[-1].heading, "Limites")
+        self.assertIn("## Références", report.to_markdown([make_evidence()]))
 
     def test_citations_are_valid(self):
         evidence = make_evidence(evidence_id="evidence_known")

@@ -49,6 +49,8 @@ class ResearchRunModel(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_request: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    report_language: Mapped[str] = mapped_column(String(64), nullable=False, default="zh-CN")
+    report_language_source: Mapped[str] = mapped_column(String(20), nullable=False, default="legacy")
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     max_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     iteration: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -96,6 +98,8 @@ class ResearchPlanModel(Base):
     )
     research_question: Mapped[str] = mapped_column(Text, nullable=False)
     scope: Mapped[str] = mapped_column(Text, nullable=False)
+    research_domains: Mapped[list[str]] = mapped_column(JSON, default=list)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
     completion_rules: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     run: Mapped[ResearchRunModel] = relationship(back_populates="plan")
@@ -234,6 +238,7 @@ class ReportModel(Base):
         ForeignKey("research_runs.id", ondelete="CASCADE"), primary_key=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_heading: Mapped[str] = mapped_column(Text, nullable=False, default="参考文献")
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

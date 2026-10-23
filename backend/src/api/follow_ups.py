@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections.abc import AsyncIterator
 
@@ -80,7 +81,7 @@ async def create_follow_up(run_id: str, payload: CreateFollowUpThread, request: 
                 status_code=409,
                 detail="Selection overlaps an existing follow-up conversation",
             ) from exc
-    _start_generation(request, started)
+    _start_generation(request, started, run.report_language)
     return started.thread
 
 
@@ -114,7 +115,7 @@ async def delete_follow_up(run_id: str, thread_id: str, request: Request):
 async def append_follow_up_question(
     run_id: str, thread_id: str, payload: AppendFollowUpQuestion, request: Request,
 ):
-    _eligible_run(request.app.state.repository, run_id)
+    run = _eligible_run(request.app.state.repository, run_id)
     question = payload.question.strip()
     if not question:
         raise HTTPException(status_code=422, detail="Question cannot be blank")
@@ -131,7 +132,7 @@ async def append_follow_up_question(
             raise HTTPException(status_code=409, detail="Follow-up answer is still generating") from exc
         except FollowUpNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Follow-up thread not found") from exc
-        _start_generation(request, started)
+        _start_generation(request, started, run.report_language)
         return started.thread
 
 
@@ -140,7 +141,7 @@ async def append_follow_up_question(
 async def retry_follow_up_message(
     run_id: str, thread_id: str, message_id: int, request: Request,
 ):
-    _eligible_run(request.app.state.repository, run_id)
+    run = _eligible_run(request.app.state.repository, run_id)
     lock = request.app.state.follow_up_locks.setdefault(thread_id, asyncio.Lock())
     async with lock:
         try:
@@ -156,7 +157,7 @@ async def retry_follow_up_message(
             raise HTTPException(status_code=409, detail="Follow-up answer cannot be retried") from exc
         except FollowUpNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Follow-up message not found") from exc
-        _start_generation(request, started)
+        _start_generation(request, started, run.report_language)
         return started.thread
 
 
@@ -218,7 +219,7 @@ async def stream_follow_up_events(
     )
 
 
-def _start_generation(request: Request, started) -> None:
+def _start_generation(request: Request, started, report_language: str = "zh-CN") -> None:
     tasks: dict[str, asyncio.Task] = request.app.state.follow_up_tasks
     thread_id = started.thread["id"]
 
@@ -227,7 +228,7 @@ def _start_generation(request: Request, started) -> None:
         answerer = request.app.state.follow_up_answerer
         received = False
         try:
-            async for chunk in _stream_chunks(answerer, started):
+            async for chunk in _stream_chunks(answerer, started, report_language):
                 if not chunk:
                     continue
                 received = True
@@ -300,11 +301,24 @@ async def cancel_follow_up_tasks(request: Request, thread_ids: list[str]) -> Non
         tasks.pop(thread_id, None)
 
 
-async def _stream_chunks(answerer, started) -> AsyncIterator[str]:
+def _accepts_report_language(method) -> bool:
+    try:
+        return "report_language" in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+async def _stream_chunks(answerer, started, report_language: str) -> AsyncIterator[str]:
     passage = started.thread["anchor"]["text"]
     history = bounded_follow_up_history(passage, started.history)
     if hasattr(answerer, "stream"):
-        async for chunk in answerer.stream(passage, history):
+        kwargs = {"report_language": report_language} if _accepts_report_language(
+            answerer.stream
+        ) else {}
+        async for chunk in answerer.stream(passage, history, **kwargs):
             yield chunk
         return
-    yield await answerer.answer(passage, history)
+    kwargs = {"report_language": report_language} if _accepts_report_language(
+        answerer.answer
+    ) else {}
+    yield await answerer.answer(passage, history, **kwargs)

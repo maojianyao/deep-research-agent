@@ -115,12 +115,52 @@ class ResearchApiTests(unittest.TestCase):
                 "max_iterations": 2,
             })
             self.assertEqual(response.status_code, 202)
+            self.assertEqual(response.json()["report_language"], "en")
             run_id = response.json()["id"]
             self.assertEqual(response.json()["status"], "planning")
 
         saved = self.app.state.repository.get_run(run_id)
         self.assertEqual(saved.status, "completed")
+        self.assertEqual(saved.report_language, "en")
+        self.assertEqual(saved.report_language_source, "detected")
         self.assertEqual(self.starts, [run_id])
+
+    def test_create_honors_explicit_language_alias_and_rejects_invalid_tag(self):
+        with self.client:
+            response = self.client.post("/api/research-runs", json={
+                "user_request": "研究一项政策",
+                "report_language": "Japanese",
+            })
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertEqual(response.json()["report_language"], "ja")
+            run_id = response.json()["id"]
+
+        saved = self.app.state.repository.get_run(run_id)
+        self.assertEqual(saved.report_language, "ja")
+        self.assertEqual(saved.report_language_source, "explicit")
+
+        invalid = self.client.post("/api/research-runs", json={
+            "user_request": "Research this",
+            "report_language": "not a language!",
+        })
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_detail_and_list_expose_language_quality_and_direction(self):
+        run = make_persisted_run()
+        run.report_language = "ar"
+        run.report_language_source = "explicit"
+        run.report.report_language = "ar"
+        self.app.state.repository.save_run(run)
+
+        detail = self.client.get(f"/api/research-runs/{run.id}").json()
+        summary = self.client.get("/api/research-runs").json()["items"][0]
+
+        self.assertEqual(detail["report_language"], "ar")
+        self.assertEqual(detail["report_language_name"], "العربية")
+        self.assertEqual(detail["report_direction"], "rtl")
+        self.assertEqual(detail["report"]["language"], "ar")
+        self.assertEqual(summary["report_language"], "ar")
+        self.assertEqual(summary["report_language_quality"], "verified")
 
     def test_resume_is_idempotent_for_active_and_rejects_terminal(self):
         run = ResearchRun(user_request="Resume me", status=RunStatus.RESEARCHING)

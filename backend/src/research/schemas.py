@@ -62,6 +62,8 @@ class ResearchPlan(BaseModel):
 
     research_question: str = Field(description="归一化后的总研究问题。")
     scope: str = Field(description="时间、地域、对象和不包含内容的边界。")
+    research_domains: list[str] = Field(default_factory=list, description="自动识别的适用研究领域。")
+    risk_level: Literal["standard", "high"] = Field(default="standard", description="高风险主题需采用更严格的证据标准。")
     tasks: list[ResearchTask] = Field(min_length=1, description="至少一个可执行子任务。")
     completion_rules: list[str] = Field(default_factory=list, description="整项研究进入写作前的验收规则。")
 
@@ -90,6 +92,8 @@ class ResearchPlanDraft(BaseModel):
 
     research_question: str = Field(description="归一化后的总研究问题。")
     scope: str = Field(description="时间、地域、对象和不包含内容的边界。")
+    research_domains: list[str] = Field(default_factory=list, description="适用于本题的一个或多个研究领域。")
+    risk_level: Literal["standard", "high"] = Field(default="standard", description="涉及医疗、法律、金融、公共安全等决策时为 high。")
     tasks: list[ResearchTaskDraft] = Field(min_length=1, description="至少一个可执行子任务。")
     completion_rules: list[str] = Field(default_factory=list, description="整项研究进入写作前的验收规则。")
 
@@ -98,6 +102,8 @@ class ResearchPlanDraft(BaseModel):
         return ResearchPlan(
             research_question=self.research_question,
             scope=self.scope,
+            research_domains=self.research_domains,
+            risk_level=self.risk_level,
             tasks=[item.to_task() for item in self.tasks],
             completion_rules=self.completion_rules,
         )
@@ -293,7 +299,7 @@ class CriticReview(BaseModel):
 class FindingDraft(BaseModel):
     """Synthesizer 的综合结论草稿；evidence_ids 由应用层校验后回绑。"""
 
-    statement: str = Field(min_length=1, description="叙述性综合结论（200-500字）：主结论+支撑细节+限定条件，禁止罗列拼接。")
+    statement: str = Field(min_length=1, description="叙述性综合结论，信息量约等于 200-500 个汉字：主结论+支撑细节+限定条件，禁止罗列拼接。")
     classification: Literal["fact", "inference", "contested"] = Field(default="fact", description="事实、推断或存在争议的判断。")
     confidence: float = Field(ge=0, le=1, description="综合置信度。")
     caveats: list[str] = Field(default_factory=list, description="写作时必须保留的不确定性。")
@@ -330,9 +336,13 @@ class SectionDraft(BaseModel):
 class SummaryDraft(BaseModel):
     """Writer 收束阶段的输出：执行摘要、结论与局限。"""
 
-    executive_summary: str = Field(min_length=1, description="执行摘要：150-300字概括核心判断。")
+    executive_summary: str = Field(min_length=1, description="执行摘要：信息量约等于 150-300 个汉字，概括核心判断。")
+    executive_summary_heading: str = Field(min_length=1, description="报告语言中的执行摘要标题。")
     conclusion: str = Field(min_length=1, description="结论：回应研究问题，区分事实、推断与争议。")
+    conclusion_heading: str = Field(min_length=1, description="报告语言中的结论标题。")
     limitations: str | None = Field(default=None, description="全篇不确定性与审稿存疑点汇总；无则 null。")
+    limitations_heading: str = Field(min_length=1, description="报告语言中的局限标题。")
+    reference_heading: str = Field(min_length=1, description="报告语言中的参考文献标题。")
 
 
 class ReportBlock(BaseModel):
@@ -348,6 +358,8 @@ class ReportDraft(BaseModel):
     """Writer 输出的报告草稿；发布前必须通过引用校验。"""
 
     title: str = Field(min_length=1, description="报告标题。")
+    report_language: str = Field(default="zh-CN", description="该报告使用的规范 BCP 47 语言标签。")
+    reference_heading: str = Field(default="参考文献", description="报告语言中的参考文献标题。")
     blocks: list[ReportBlock] = Field(min_length=1, description="至少一个可追溯的报告内容块。")
 
     def to_markdown(self, evidence: list[EvidenceCard] | None = None) -> str:
@@ -370,11 +382,11 @@ class ReportDraft(BaseModel):
                     continue
                 seen_sources.update(keys)
                 unique_sources.append(source)
-            lines.append("## 参考文献")
+            lines.append(f"## {self.reference_heading}")
             lines.append("")
             for index, source in enumerate(unique_sources, start=1):
-                meta = "，".join(part for part in (source.publisher, source.published_at) if part)
-                lines.append(f"{index}. [{source.title}]({source.url})" + (f"（{meta}）" if meta else ""))
+                meta = " · ".join(part for part in (source.publisher, source.published_at) if part)
+                lines.append(f"{index}. [{source.title}]({source.url})" + (f" ({meta})" if meta else ""))
             lines.append("")
         return "\n".join(lines).strip() + "\n"
 
@@ -391,6 +403,10 @@ class ResearchRun(BaseModel):
 
     id: str = Field(default_factory=lambda: new_id("run"), description="本次研究运行的稳定标识符。")
     user_request: str = Field(min_length=1, description="用户的原始研究请求，不能为空。")
+    report_language: str = Field(default="zh-CN", description="本次研究全程使用的规范 BCP 47 报告语言。")
+    report_language_source: Literal["explicit", "detected", "fallback", "legacy"] = Field(
+        default="legacy", description="报告语言的来源，用于审计语言推断行为。"
+    )
     max_iterations: int = Field(default=3, ge=1, description="Critic 可要求补证的最大轮次，至少为 1。")
     iteration: int = Field(default=0, ge=0, description="已完成的检索轮次，不允许为负数。")
     status: RunStatus = Field(default=RunStatus.PLANNING, description="编排器当前所处的状态。")

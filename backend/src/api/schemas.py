@@ -2,24 +2,44 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from backend.src.research.language import InvalidLanguageTag, canonicalize_language
 from backend.src.research.schemas import RunStatus
 
 
 class CreateResearchRun(BaseModel):
     user_request: str = Field(min_length=1, max_length=2000)
     max_iterations: int = Field(default=3, ge=1, le=5)
+    report_language: str | None = Field(
+        default=None,
+        description="目标报告语言；省略时根据研究请求推断。",
+    )
+
+    @field_validator("report_language")
+    @classmethod
+    def validate_report_language(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            return canonicalize_language(value)
+        except InvalidLanguageTag as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class AcceptedResearchRun(BaseModel):
     id: str
     status: RunStatus
+    report_language: str
 
 
 class ResearchRunSummary(BaseModel):
     id: str
     user_request: str
+    report_language: str
+    report_language_name: str
+    report_language_quality: str
+    report_direction: str
     status: RunStatus
     resume_status: RunStatus | None = None
     unfinished_tasks: int = 0
@@ -62,6 +82,8 @@ class TaskView(BaseModel):
 class ResearchPlanView(BaseModel):
     research_question: str
     scope: str
+    research_domains: list[str]
+    risk_level: str
     completion_rules: list[str]
     tasks: list[TaskView]
 
@@ -118,6 +140,9 @@ class ReportBlockView(BaseModel):
 
 class ReportView(BaseModel):
     title: str
+    language: str
+    language_name: str
+    direction: str
     markdown: str
     anchor_digest: str
     blocks: list[ReportBlockView]
@@ -131,6 +156,7 @@ class RunEventView(BaseModel):
 
 class ResearchProgress(BaseModel):
     id: str
+    report_language: str
     status: RunStatus
     iteration: int
     max_iterations: int
@@ -141,6 +167,11 @@ class ResearchProgress(BaseModel):
 class ResearchRunDetail(BaseModel):
     id: str
     user_request: str
+    report_language: str
+    report_language_name: str
+    report_language_source: str
+    report_language_quality: str
+    report_direction: str
     status: RunStatus
     can_resume: bool = False
     error: str | None = None

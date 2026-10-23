@@ -33,6 +33,8 @@ class ResearchRunRepository:
             model = ResearchRunModel(
                 id=run.id,
                 user_request=run.user_request,
+                report_language=run.report_language,
+                report_language_source=run.report_language_source,
                 status=run.status.value,
                 max_iterations=run.max_iterations,
                 iteration=run.iteration,
@@ -44,6 +46,8 @@ class ResearchRunRepository:
                 model.plan = ResearchPlanModel(
                     research_question=run.plan.research_question,
                     scope=run.plan.scope,
+                    research_domains=run.plan.research_domains,
+                    risk_level=run.plan.risk_level,
                     completion_rules=run.plan.completion_rules,
                 )
                 model.tasks = [
@@ -143,6 +147,7 @@ class ResearchRunRepository:
                 report = ReportModel(
                     run=model,
                     title=run.report.title,
+                    reference_heading=run.report.reference_heading,
                     markdown=run.to_markdown() or "",
                 )
                 report.blocks = [
@@ -173,6 +178,7 @@ class ResearchRunRepository:
             select(
                 ResearchRunModel.id,
                 ResearchRunModel.user_request,
+                ResearchRunModel.report_language,
                 ResearchRunModel.status,
                 ResearchRunModel.resume_status,
                 ResearchRunModel.iteration,
@@ -281,6 +287,7 @@ class ResearchRunRepository:
         with Session(self.engine) as session:
             row = session.execute(select(
                 ResearchRunModel.id,
+                ResearchRunModel.report_language,
                 ResearchRunModel.status,
                 ResearchRunModel.iteration,
                 ResearchRunModel.max_iterations,
@@ -298,6 +305,7 @@ class ResearchRunRepository:
             ).order_by(RunEventModel.sequence)).all()
             return {
                 "id": row.id,
+                "report_language": row.report_language,
                 "status": row.status,
                 "iteration": row.iteration,
                 "max_iterations": row.max_iterations,
@@ -417,6 +425,8 @@ class ResearchRunRepository:
         plan = ResearchPlan(
             research_question=model.plan.research_question,
             scope=model.plan.scope,
+            research_domains=model.plan.research_domains or [],
+            risk_level=model.plan.risk_level or "standard",
             completion_rules=model.plan.completion_rules,
             tasks=tasks,
         ) if model.plan else None
@@ -475,6 +485,8 @@ class ResearchRunRepository:
         ) for item in sorted(model.critiques, key=lambda review: review.iteration)]
         report = ReportDraft(
             title=model.report.title,
+            report_language=model.report_language or "zh-CN",
+            reference_heading=model.report.reference_heading or "参考文献",
             blocks=[ReportBlock(
                 heading=block.heading,
                 text=block.text,
@@ -485,6 +497,8 @@ class ResearchRunRepository:
         return ResearchRun(
             id=model.id,
             user_request=model.user_request,
+            report_language=model.report_language or "zh-CN",
+            report_language_source=model.report_language_source or "legacy",
             status=RunStatus(model.status),
             max_iterations=model.max_iterations,
             iteration=model.iteration,

@@ -29,14 +29,13 @@ logger = get_logger(__name__)
 class ResearcherAgent:
     """检索原始资料并提取候选证据，不对其可信度作最终裁定。"""
     _QUERY_BATCH_SIZE = 2  # 单次结构化调用承载的查询数：输入规模 = 批内查询 × 命中文档数
-    _MAX_DOC_CHARS = 2000  # 单文档进入提示词的最大字符数（中文 1 字 ≈ 1 token，2000 字窗口足够证据摘录）
+    _MAX_DOC_CHARS = 2000  # 单文档进入提示词的字符窗口，最终预算仍由模型载荷估算控制
     _MAX_DOCS_PER_CALL = 12  # 单次结构化调用的文档数上限：文档数 × 文档窗口共同决定输入规模
     _MAX_DOCS_PER_DOMAIN = 2  # 单域名入选上限，防止单一站点垄断提示词
     _MIN_CONTENT_CHARS = 50  # 正文最短字符数，过滤无实质内容的占位文档
     _MAX_EXCERPT_CHARS = 600  # 候选证据摘录窗口；原始文档全文仍由应用层持有
     _MAX_CANDIDATES_PER_URL = 2  # 单 URL 候选上限，防止单一来源刷屏
     _MAX_CANDIDATES = 12  # 单批返回候选上限
-    _ROLE = RoleContext(user_role=RoleAgent.RESEARCHER)
 
     def __init__(self, model: BaseChatModel, searches: list[Search], max_concurrent_searches: int = 4):
         self.agent = create_agent(model,
@@ -85,7 +84,7 @@ class ResearcherAgent:
         logger.info("文档筛选：%d 篇去重候选 → 入选 %d 篇，覆盖 %d 个域名",
                     len(documents), len(prompt_documents), len(domains))
         try:
-            batch = await self._bounded(partial(_ainvoke, self.agent, self._ROLE, json.dumps({
+            batch = await self._bounded(partial(_ainvoke, self.agent, self._role, json.dumps({
                 "task": task.model_dump(),
                 "documents": [
                     {**item.model_dump(mode="json"), "content": truncate_text(item.content, self._MAX_DOC_CHARS)}
@@ -105,11 +104,15 @@ class ResearcherAgent:
 
     @staticmethod
     def _keywords(task: ResearchTask) -> set[str]:
-        """从任务问题与查询词提取检索词元：英文单词 + 中文 2-gram，用于轻量相关性打分。"""
+        """Extract Unicode word tokens plus CJK n-grams for language-neutral relevance."""
         text = " ".join([task.question, *task.queries])
-        tokens = {word.lower() for word in re.findall(r"[A-Za-z][A-Za-z0-9+#.]{1,}", text)}
-        tokens.update(text[i:i + 2] for i in range(len(text) - 1)
-                      if "\u4e00" <= text[i] <= "\u9fff" and "\u4e00" <= text[i + 1] <= "\u9fff")
+        tokens = {
+            word.casefold()
+            for word in re.findall(r"[^\W_]+", text, flags=re.UNICODE)
+            if len(word) > 1
+        }
+        cjk = "".join(ch for ch in text if "\u3400" <= ch <= "\u9fff")
+        tokens.update(cjk[i:i + 2] for i in range(len(cjk) - 1))
         return tokens
 
     _SOURCE_TYPE_WEIGHTS: dict[str, int] = {
@@ -188,8 +191,9 @@ class ResearcherAgent:
                 break
         return limited
 
-    async def run(self, task: ResearchTask) -> list[CandidateEvidence]:
+    async def run(self, task: ResearchTask, report_language: str = "zh-CN") -> list[CandidateEvidence]:
         """覆盖全部查询：查询分批后各自检索与提取（批间并发），最后按（来源, 主张）去重合并。"""
+        self._role = RoleContext(user_role=RoleAgent.RESEARCHER, report_language=report_language)
         queries = task.queries or [task.question]
         batches = [queries[i:i + self._QUERY_BATCH_SIZE] for i in range(0, len(queries), self._QUERY_BATCH_SIZE)]
         results = await asyncio.gather(*(self._extract(task, batch) for batch in batches), return_exceptions=True)

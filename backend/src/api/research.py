@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.responses import StreamingResponse
 
 from backend.src.research.schemas import ResearchRun, RunStatus
+from backend.src.research.language import language_profile, resolve_report_language
 from backend.src.api.follow_ups import cancel_follow_up_tasks
 from backend.src.services.follow_up import report_anchor_digest
 from backend.src.storage.repository import ResearchRunRepository
@@ -118,9 +119,15 @@ def _restore_checkpoint(run: ResearchRun) -> None:
 
 def _detail(model) -> dict:
     critiques = sorted(model.critiques, key=lambda item: item.iteration)
+    profile = language_profile(model.report_language)
     return {
         "id": model.id,
         "user_request": model.user_request,
+        "report_language": profile.tag,
+        "report_language_name": profile.name,
+        "report_language_source": model.report_language_source,
+        "report_language_quality": profile.quality,
+        "report_direction": profile.direction,
         "status": model.status,
         "can_resume": _can_resume(model),
         "error": next((
@@ -135,6 +142,8 @@ def _detail(model) -> dict:
         "plan": None if model.plan is None else {
             "research_question": model.plan.research_question,
             "scope": model.plan.scope,
+            "research_domains": model.plan.research_domains or [],
+            "risk_level": model.plan.risk_level or "standard",
             "completion_rules": model.plan.completion_rules,
             "tasks": [{
                 "id": task.id,
@@ -192,6 +201,9 @@ def _detail(model) -> dict:
         } for review in critiques],
         "report": None if model.report is None else {
             "title": model.report.title,
+            "language": profile.tag,
+            "language_name": profile.name,
+            "direction": profile.direction,
             "markdown": model.report.markdown,
             "anchor_digest": report_anchor_digest(model.report.markdown),
             "blocks": [{
@@ -269,11 +281,23 @@ def _start(request: Request, run: ResearchRun) -> None:
 
 @router.post("", response_model=AcceptedResearchRun, status_code=status.HTTP_202_ACCEPTED)
 async def create_research_run(payload: CreateResearchRun, request: Request):
-    run = ResearchRun(user_request=payload.user_request, max_iterations=payload.max_iterations)
+    report_language, language_source = resolve_report_language(
+        payload.user_request, payload.report_language
+    )
+    run = ResearchRun(
+        user_request=payload.user_request,
+        report_language=report_language,
+        report_language_source=language_source,
+        max_iterations=payload.max_iterations,
+    )
     repository: ResearchRunRepository = request.app.state.repository
     await asyncio.to_thread(repository.save_run, run)
     _start(request, run)
-    return {"id": run.id, "status": run.status.value}
+    return {
+        "id": run.id,
+        "status": run.status.value,
+        "report_language": run.report_language,
+    }
 
 
 @router.get("", response_model=ResearchRunList)
@@ -294,7 +318,17 @@ def list_research_runs(
         search=search,
     )
     total = repository.count_runs(status=status_filter, search=search)
-    return {"items": rows, "total": total, "page": page, "page_size": page_size}
+    items = []
+    for row in rows:
+        profile = language_profile(row["report_language"])
+        items.append({
+            **row,
+            "report_language": profile.tag,
+            "report_language_name": profile.name,
+            "report_language_quality": profile.quality,
+            "report_direction": profile.direction,
+        })
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/{run_id}", response_model=ResearchRunDetail)
@@ -415,7 +449,11 @@ async def resume_research_run(run_id: str, request: Request):
         model = repository.get_run(run_id)
         if model is None:
             raise HTTPException(status_code=404, detail="Research run not found")
-        return {"id": run_id, "status": model.status}
+        return {
+            "id": run_id,
+            "status": model.status,
+            "report_language": model.report_language,
+        }
 
     run = await asyncio.to_thread(repository.load_run, run_id)
     if run is None:
@@ -432,7 +470,11 @@ async def resume_research_run(run_id: str, request: Request):
     if checkpoint is None or checkpoint.status is not run.status:
         raise HTTPException(status_code=500, detail="Unable to persist research checkpoint")
     _start(request, run)
-    return {"id": run.id, "status": run.status.value}
+    return {
+        "id": run.id,
+        "status": run.status.value,
+        "report_language": run.report_language,
+    }
 
 
 @router.post("/{run_id}/cancel", response_model=AcceptedResearchRun,
@@ -458,4 +500,8 @@ async def cancel_research_run(run_id: str, request: Request):
         run.status = RunStatus.CANCELLED
         run.event("研究任务已结束")
         await asyncio.to_thread(repository.save_run, run)
-    return {"id": run_id, "status": RunStatus.CANCELLED.value}
+    return {
+        "id": run_id,
+        "status": RunStatus.CANCELLED.value,
+        "report_language": model.report_language,
+    }

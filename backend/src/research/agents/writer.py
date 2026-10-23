@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 
 from langchain.agents import create_agent
@@ -24,9 +25,6 @@ logger = get_logger(__name__)
 
 class WriterAgent:
     """三阶段写作：大纲规划 → 顺序分章撰写 → 摘要收束，维持全文论证连贯。"""
-    _OUTLINE_ROLE = RoleContext(user_role=RoleAgent.WRITER, mode="outline")
-    _SECTION_ROLE = RoleContext(user_role=RoleAgent.WRITER, mode="section")
-    _SUMMARY_ROLE = RoleContext(user_role=RoleAgent.WRITER, mode="summary")
     _SECTION_INPUT_BUDGET_TOKENS = WRITER_SECTION_INPUT_BUDGET_TOKENS
     _FINDING_STATEMENT_CHARS = 500
     _SECTION_EXCERPT_CHARS = 800
@@ -49,31 +47,64 @@ class WriterAgent:
                                           response_format=ToolStrategy(SummaryDraft),
                                           )
 
-    async def run(self, request: str, findings: list[Finding], evidence: list[EvidenceCard],
-                  task_questions: dict[str, str] | None = None) -> ReportDraft:
+    async def run(
+        self,
+        request: str,
+        findings: list[Finding],
+        evidence: list[EvidenceCard],
+        task_questions: dict[str, str] | None = None,
+        report_language: str = "zh-CN",
+        language_feedback: str | None = None,
+        plan=None,
+    ) -> ReportDraft:
         """三阶段编排：大纲 → 顺序分章 → 摘要收束与应用层组装。"""
         task_questions = task_questions or {}
-        outline = await self.plan_outline(request, findings, task_questions)
+        outline = await self.plan_outline(
+            request, findings, task_questions, report_language, language_feedback, plan
+        )
         finding_by_id = {item.id: item for item in findings}
         evidence_by_id = {item.id: item for item in evidence}
         sections: list[SectionDraft] = []
         for index in range(len(outline.sections)):
+            kwargs = {
+                "previous_section": sections[-1] if sections else None,
+                "report_language": report_language,
+                "language_feedback": language_feedback,
+                "plan": plan,
+            }
+            if inspect.iscoroutinefunction(self.write_section):
+                parameters = inspect.signature(self.write_section).parameters
+                if "report_language" not in parameters:
+                    kwargs = {"previous_section": kwargs["previous_section"]}
             section = await self.write_section(
                 request, outline, index, finding_by_id, evidence_by_id, task_questions,
-                previous_section=sections[-1] if sections else None,
+                **kwargs,
             )
             sections.append(section)
-        summary = await self.write_summary(outline, sections)
-        return self.assemble(outline, sections, summary)
+        summary = await self.write_summary(
+            outline, sections, report_language, language_feedback, plan
+        )
+        return self.assemble(outline, sections, summary, report_language)
 
     async def plan_outline(self, request: str, findings: list[Finding],
-                           task_questions: dict[str, str]) -> ReportOutline:
+                           task_questions: dict[str, str],
+                           report_language: str = "zh-CN",
+                           language_feedback: str | None = None,
+                           plan=None) -> ReportOutline:
         """阶段一：按研究维度规划章节结构，并保证每条结论恰好分配到一个章节。"""
         finding_items = [item.to_digest(statement_chars=self._FINDING_STATEMENT_CHARS).model_dump()
                          for item in findings]
         payload = json.dumps({"request": request, "task_questions": task_questions,
+                              "research_profile": {
+                                  "domains": list(getattr(plan, "research_domains", []) or []),
+                                  "risk_level": getattr(plan, "risk_level", "standard") or "standard",
+                              },
+                              "language_feedback": language_feedback,
                               "findings": finding_items}, ensure_ascii=False)
-        outline: ReportOutline = await _ainvoke(self.outline_agent, self._OUTLINE_ROLE, payload)
+        role = RoleContext(
+            user_role=RoleAgent.WRITER, mode="outline", report_language=report_language
+        )
+        outline: ReportOutline = await _ainvoke(self.outline_agent, role, payload)
         known = {item.id for item in findings}
         assigned: set[str] = set()
         for section in outline.sections:
@@ -89,7 +120,10 @@ class WriterAgent:
     async def write_section(self, request: str, outline: ReportOutline, section_index: int,
                             finding_by_id: dict[str, Finding], evidence_by_id: dict[str, EvidenceCard],
                             task_questions: dict[str, str],
-                            previous_section: SectionDraft | None = None) -> SectionDraft:
+                            previous_section: SectionDraft | None = None,
+                            report_language: str = "zh-CN",
+                            language_feedback: str | None = None,
+                            plan=None) -> SectionDraft:
         """阶段二：单章撰写；只携带本章结论与关联证据，大纲主线与上一章接口用于章节衔接。"""
         section = outline.sections[section_index]
         previous = outline.sections[section_index - 1] if section_index > 0 else None
@@ -104,6 +138,11 @@ class WriterAgent:
             "request": request,
             "report_title": outline.title,
             "narrative": outline.narrative,
+            "research_profile": {
+                "domains": list(getattr(plan, "research_domains", []) or []),
+                "risk_level": getattr(plan, "risk_level", "standard") or "standard",
+            },
+            "language_feedback": language_feedback,
             "outline": [{"heading": item.heading, "role": item.role, "key_points": item.key_points,
                          "transition_to_next": item.transition_to_next,
                          "is_current": item.heading == section.heading} for item in outline.sections],
@@ -124,7 +163,10 @@ class WriterAgent:
                          for item in section_findings],
             "evidence": evidence_items,
         }, ensure_ascii=False)
-        draft: SectionDraft = await _ainvoke(self.section_agent, self._SECTION_ROLE, payload)
+        role = RoleContext(
+            user_role=RoleAgent.WRITER, mode="section", report_language=report_language
+        )
+        draft: SectionDraft = await _ainvoke(self.section_agent, role, payload)
         draft.heading = section.heading
         draft.key_points = list(section.key_points)
         # Bind references from the application-owned outline/findings; a model cannot drop them.
@@ -132,33 +174,51 @@ class WriterAgent:
         draft.evidence_ids = [eid for eid in related_ids if eid in evidence_by_id]
         return draft
 
-    async def write_summary(self, outline: ReportOutline, sections: list[SectionDraft]) -> SummaryDraft:
+    async def write_summary(self, outline: ReportOutline, sections: list[SectionDraft],
+                            report_language: str = "zh-CN",
+                            language_feedback: str | None = None,
+                            plan=None) -> SummaryDraft:
         """阶段三：基于各章要点与正文摘要撰写执行摘要、结论与局限，保证全文前后呼应。"""
         payload = json.dumps({
             "report_title": outline.title,
+            "language_feedback": language_feedback,
+            "research_profile": {
+                "domains": list(getattr(plan, "research_domains", []) or []),
+                "risk_level": getattr(plan, "risk_level", "standard") or "standard",
+            },
             "sections": [{"heading": item.heading,
                           "key_points": item.key_points,
                           "text_brief": truncate_text(item.text, self._SECTION_TEXT_BRIEF_CHARS)}
                          for item in sections],
         }, ensure_ascii=False)
-        return await _ainvoke(self.summary_agent, self._SUMMARY_ROLE, payload)
+        role = RoleContext(
+            user_role=RoleAgent.WRITER, mode="summary", report_language=report_language
+        )
+        return await _ainvoke(self.summary_agent, role, payload)
 
     @staticmethod
-    def assemble(outline: ReportOutline, sections: list[SectionDraft], summary: SummaryDraft) -> ReportDraft:
+    def assemble(outline: ReportOutline, sections: list[SectionDraft], summary: SummaryDraft,
+                 report_language: str = "zh-CN") -> ReportDraft:
         """应用层组装：摘要在前、分章居中、结论与局限收尾；纯确定性操作，不经过模型。"""
         finding_ids = list(dict.fromkeys(fid for item in sections for fid in item.finding_ids))
         evidence_ids = list(dict.fromkeys(eid for item in sections for eid in item.evidence_ids))
-        blocks = [ReportBlock(heading="执行摘要", text=summary.executive_summary,
+        blocks = [ReportBlock(heading=summary.executive_summary_heading,
+                              text=summary.executive_summary,
                               finding_ids=finding_ids, evidence_ids=evidence_ids)]
         blocks += [ReportBlock(heading=item.heading, text=item.text,
                                finding_ids=item.finding_ids, evidence_ids=item.evidence_ids)
                    for item in sections]
-        blocks.append(ReportBlock(heading="结论与建议", text=summary.conclusion,
+        blocks.append(ReportBlock(heading=summary.conclusion_heading, text=summary.conclusion,
                                   finding_ids=finding_ids, evidence_ids=evidence_ids))
         if summary.limitations:
-            blocks.append(ReportBlock(heading="不确定性与局限", text=summary.limitations,
+            blocks.append(ReportBlock(heading=summary.limitations_heading, text=summary.limitations,
                                       finding_ids=finding_ids, evidence_ids=evidence_ids))
-        return ReportDraft(title=outline.title, blocks=blocks)
+        return ReportDraft(
+            title=outline.title,
+            report_language=report_language,
+            reference_heading=summary.reference_heading,
+            blocks=blocks,
+        )
 
     @staticmethod
     def citations_are_valid(draft: ReportDraft, evidence: list[EvidenceCard]) -> bool:

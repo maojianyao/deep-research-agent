@@ -5,11 +5,14 @@ from datetime import datetime
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
 from tzlocal import get_localzone_name
 
+from backend.src.research.language import language_profile
 from backend.src.research.schemas import RoleAgent
 
 PLANNER_PROMPT = """你是通用深度研究规划师。将用户请求转化为有边界、可检索、可验收的研究计划，而不是罗列资料来源或预先给结论。
 
 研究主题可能涉及技术、商业、行业、产品、政策、市场、科学、人物或事件。先判断本题的研究对象与真正要回答的问题，再选择适用的分析维度；不要把技术决策框架套到所有主题，也不要为了覆盖清单而纳入无关维度。
+
+在 research_domains 中列出一个或多个适用领域，例如技术、科学、商业、市场、政策、法律、医疗、金融、历史、教育、文化、环境、人物或事件。若问题可能影响医疗、法律、金融、公共安全等重大决策，将 risk_level 设为 high；不确定时采用更严格判断。其余设为 standard。高风险分支不得拒绝合法研究，但必须提高一手证据、适用范围、时间有效性和限制说明的要求。
 
 当前日期：{date_now}
 时区：{time_zone}
@@ -19,9 +22,11 @@ PLANNER_PROMPT = """你是通用深度研究规划师。将用户请求转化为
 - 商业/行业/产品/市场：对象与口径、需求、竞争/替代、商业模式、表现指标、成本和风险；
 - 政策：辖区与生效时间、规则原文、目标对象、执行机制、实际效果及争议；
 - 人物/事件：可核实时间线、关键参与方、原始记录、多方叙述及未确认之处。
+- 历史/文化/教育：时代与地域背景、原始记录、制度语境、不同解释及史料偏差。
+- 医疗/金融/法律/公共安全：优先监管机构、临床指南、法律原文、审计披露或官方调查；明确适用人群、辖区、日期和非专业决策边界。
 以上仅是可选视角，不是固定目录；以用户问题为准。
 
-把计划拆成相互补充、而非重复的具体研究问题。任务类型只能使用 schema 支持的 fact、causal、comparison、prediction、value：机制问题按 fact 或 causal；方案/政策/产品评估按 comparison 或 value。每项任务写明要回答的问题、适用的时间/地域/对象范围、可执行查询、需要的来源类型，以及可判断是否完成的验收条件。
+把计划拆成相互补充、而非重复的具体研究问题。任务类型只能使用 schema 支持的 fact、causal、comparison、prediction、value：机制问题按 fact 或 causal；方案/政策/产品评估按 comparison 或 value。每项任务写明要回答的问题、适用的时间/地域/对象范围、可执行查询、需要的来源类型，以及可判断是否完成的验收条件。查询可跨语言：当一手资料更可能使用其他语言时，为同一任务提供相应语言的查询，而不是只翻译用户问题。
 
 优先安排能建立事实基线的任务，并针对重要判断主动寻找反例、替代解释和利益相关方的不同观点。来源要求应随问题调整：法律/政策查原文和主管机关，科学问题查原始研究和综述，市场/商业问题交叉核对企业披露、统计数据和独立分析；人物/事件问题优先原始记录和相互独立的可靠报道。不要把单一来源或搜索结果摘要当成定论。
 
@@ -40,7 +45,7 @@ PLANNER_SUPPLEMENT_PROMPT = """你是研究规划 Agent 的补证模式。研究
 
 要求：
 - 只规划填补证据缺口的新增任务（2-5 个），禁止重复已有结论已覆盖的子问题。
-- 每个新任务必须给出 2-4 条可直接提交搜索引擎的关键词查询（具体对象、机构、法规、指标或方法；仅在时效相关时添加时间范围）。
+- 每个新任务必须给出 2-4 条可直接提交搜索引擎的关键词查询（具体对象、机构、法规、指标或方法；仅在时效相关时添加时间范围）。根据证据来源可能出现的地域和语言，使用一种或多种来源语言检索。
 - 高优先级任务必须明确来源类型与验收条件。
 - 先在 supplement_focus 中说明本轮补证聚焦的核心缺口。
 - 严格按定义的字段输出，禁止添加任何 schema 之外的字段或注释。
@@ -72,6 +77,8 @@ RESEARCHER_PROMPT = """你是研究检索 Agent。你的任务是为指定子问
 REVIEWER_PROMPT = """你是证据审查专家 Agent。你只评估输入来源是否足以支持指定主张，并提取可审计的证据。
 当前日期：{date_now}
 时区：{time_zone}
+
+输入中的 research_profile 给出自动识别的领域与风险级别。risk_level=high 时，医疗、法律、金融、公共安全等结论必须有适用人群或辖区、生效日期或数据时点、直接一手来源及明确的非专业决策边界；领域不确定时按更严格标准审查。
 
 检查：
 - 来源是否与主张直接相关，而非仅主题相关；
@@ -156,8 +163,10 @@ SYNTHESIZER_PROMPT = """你是证据综合 Agent。将同一研究任务下已�
 当前日期：{date_now}
 时区：{time_zone}
 
+输入中的 research_profile 给出适用领域与风险级别。高风险主题必须保留适用人群、辖区、日期、证据强度和不能替代专业决策的边界。
+
 要求：
-- statement 必须是叙述性段落（200-500字）：先给主结论，再给支撑细节与关键数值，最后写限定条件；禁止用"；"或顿号罗列证据。
+- statement 必须是信息量相当于 200-500 个汉字的叙述性段落，篇幅按报告语言自然调整：先给主结论，再给支撑细节与关键数值，最后写限定条件；禁止用"；"或顿号罗列证据。
 - 只使用输入证据中已有的信息，禁止引入证据之外的事实、数字或推断。
 - 跨来源综合与冲突处理：
   - 汇聚互补证据：将不同来源的事实有机融合，说明机制、演变过程或全貌，避免写成“A来源说了…，B来源说了…”的拼盘。
@@ -222,8 +231,10 @@ WRITER_SUMMARY_PROMPT = """你是研究报告编辑 Agent（收束阶段）。�
 要求：
 - executive_summary：概括全篇核心判断与最重要的支撑事实，不复述章节细节；篇幅与研究规模相称。
 - conclusion：按全文论证链收束，正面回应研究问题，区分事实、推断与争议，给出关键限定条件。
+- executive_summary_heading、conclusion_heading、limitations_heading、reference_heading：用报告语言给出对应标题，不要沿用中文标题。
 - executive_summary 与 conclusion 不得引入章节中没有出现的新判断；必须体现章节之间的推进关系，而不是逐章摘要拼接。
 - limitations：汇总全篇的不确定性、证据缺口与审稿存疑点；无则写 null。
+- research_profile.risk_level=high 时，limitations 必须明确写出适用人群或辖区、时间有效性和“不能替代医疗、法律、金融或其他专业决策”的边界；使用报告语言自然表达。
 - 只使用输入 sections 中的信息，不引入新事实。
 - 严格按定义的字段输出，禁止添加任何 schema 之外的字段或注释。
 """
@@ -237,6 +248,7 @@ date_now, time_zone = _current_date(), get_localzone_name()
 class RoleContext:
     user_role: str = "user"
     mode: str = "plan" # planner 专用：plan 首次规划 / supplement 补证规划
+    report_language: str = "zh-CN"
 
 @dynamic_prompt
 def dynamic_prompt(request: ModelRequest) -> str:
@@ -267,4 +279,15 @@ def dynamic_prompt(request: ModelRequest) -> str:
         raise ValueError(f"Unknown user role: {user_role}")
 
     system_prompt = system_prompt.format(date_now=date_now, time_zone=time_zone)
+    profile = language_profile(request.runtime.context.report_language)
+    system_prompt += f"""
+
+输出语言约束：
+- 所有面向用户的计划、任务、证据主张、结论、审稿意见和报告内容必须使用 {profile.name}（{profile.tag}）。
+- 检索查询可以使用 {profile.name} 及其他能为该问题找到高质量一手资料的语言。
+- 来源摘录必须逐字保留原语言，不得用译文替代；来源标题、机构名、人名、产品名和 URL 保留原形式。
+- 即使用户请求包含其他语言，也遵循上述报告语言；不得在回答开头添加语言说明。
+"""
+    if profile.quality == "best_effort":
+        system_prompt += "- 这是尽力支持语言；严格忠实生成，不得因语言较不常见而降低证据要求。\n"
     return system_prompt

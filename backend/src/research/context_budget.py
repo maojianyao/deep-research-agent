@@ -37,15 +37,24 @@ FOLLOW_UP_MAX_COMPLETE_TURNS = 20
 SYNTHESIZER_INPUT_BUDGET_TOKENS = 40_000
 WRITER_SECTION_INPUT_BUDGET_TOKENS = 60_000
 
-_CJK_RANGES = (("\u3000", "\u303f"), ("\u4e00", "\u9fff"), ("\uff00", "\uffef"))
+_DENSE_TOKEN_RANGES = (
+    ("\u0900", "\u097f"),  # Devanagari
+    ("\u0e00", "\u0e7f"),  # Thai
+    ("\u3040", "\u30ff"),  # Japanese kana
+    ("\u3400", "\u9fff"),  # Han
+    ("\uac00", "\ud7af"),  # Hangul
+)
 
 
 def estimate_tokens(text: str) -> int:
-    """粗估 token 数：CJK 全角字符按 1 字 1 token，其余按 4 字符 1 token。"""
+    """Conservative multilingual token estimate without a model-specific tokenizer."""
     if not text:
         return 0
-    cjk = sum(1 for ch in text if any(lo <= ch <= hi for lo, hi in _CJK_RANGES))
-    return cjk + (len(text) - cjk + 3) // 4
+    dense = sum(
+        1 for ch in text
+        if any(lo <= ch <= hi for lo, hi in _DENSE_TOKEN_RANGES)
+    )
+    return dense + (len(text) - dense + 3) // 4
 
 
 def truncate_text(text: str, max_chars: int) -> str:

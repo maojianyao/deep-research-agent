@@ -83,12 +83,22 @@ class StorageRepositoryTests(unittest.TestCase):
 
     def test_save_and_load_complete_run(self):
         run = make_persisted_run()
+        run.report_language = "ja"
+        run.report_language_source = "explicit"
+        run.plan.research_domains = ["技术", "商业"]
+        run.plan.risk_level = "high"
+        run.report.report_language = "ja"
+        run.report.reference_heading = "参考文献"
         self.repository.save_run(run)
 
         saved = self.repository.get_run(run.id)
         self.assertIsNotNone(saved)
         self.assertEqual(saved.user_request, "Storage research topic")
         self.assertEqual(saved.status, "completed")
+        self.assertEqual(saved.report_language, "ja")
+        self.assertEqual(saved.report_language_source, "explicit")
+        self.assertEqual(saved.plan.research_domains, ["技术", "商业"])
+        self.assertEqual(saved.plan.risk_level, "high")
         self.assertEqual(saved.plan.research_question, "Example research question")
         self.assertEqual(saved.tasks[0].question, "Example question")
         self.assertEqual(saved.candidates[0].claim, "Candidate claim")
@@ -104,9 +114,12 @@ class StorageRepositoryTests(unittest.TestCase):
         self.assertEqual(saved.critiques[1].approved_findings[0].id, "finding_storage")
         self.assertEqual(saved.critiques[1].issues[0].problem, "Example issue")
         self.assertEqual(saved.report.title, "Example report")
+        self.assertEqual(saved.report.reference_heading, "参考文献")
         self.assertIn("# Example report", saved.report.markdown)
         self.assertEqual(saved.report.blocks[0].heading, "Summary")
         self.assertEqual([event.message for event in saved.events], run.events)
+        loaded = self.repository.load_run(run.id)
+        self.assertEqual(loaded.report.report_language, "ja")
 
     def test_save_is_idempotent_for_the_same_run(self):
         run = make_persisted_run()
@@ -217,6 +230,74 @@ class StorageRepositoryTests(unittest.TestCase):
         columns = {item["name"] for item in inspect(old_engine).get_columns("research_runs")}
         self.assertIn("resume_status", columns)
         self.assertIn("resume_iteration", columns)
+        self.assertIn("report_language", columns)
+        self.assertIn("report_language_source", columns)
+        old_engine.dispose()
+
+    def test_init_db_migrates_existing_plan_and_report_tables(self):
+        old_engine = create_engine(
+            f"sqlite:///{Path(self.temp.name) / 'old-related.db'}"
+        )
+        with old_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE TABLE research_runs (id VARCHAR(32) PRIMARY KEY, user_request TEXT NOT NULL, "
+                "status VARCHAR(32) NOT NULL, max_iterations INTEGER NOT NULL DEFAULT 3, "
+                "iteration INTEGER NOT NULL DEFAULT 0, created_at DATETIME, updated_at DATETIME)"
+            )
+            connection.exec_driver_sql(
+                "CREATE TABLE research_plans (run_id VARCHAR(32) PRIMARY KEY, "
+                "research_question TEXT NOT NULL, scope TEXT NOT NULL, completion_rules JSON)"
+            )
+            connection.exec_driver_sql(
+                "CREATE TABLE reports (run_id VARCHAR(32) PRIMARY KEY, "
+                "title TEXT NOT NULL, markdown TEXT NOT NULL, created_at DATETIME, updated_at DATETIME)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO research_runs "
+                "(id, user_request, status, max_iterations, iteration) "
+                "VALUES ('legacy', '旧研究', 'completed', 3, 1)"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO research_plans "
+                "(run_id, research_question, scope, completion_rules) "
+                "VALUES ('legacy', '旧问题', '旧范围', '[]')"
+            )
+            connection.exec_driver_sql(
+                "INSERT INTO reports (run_id, title, markdown) "
+                "VALUES ('legacy', '旧报告', '# 旧报告')"
+            )
+
+        init_db(old_engine)
+        init_db(old_engine)
+
+        run_columns = {
+            item["name"] for item in inspect(old_engine).get_columns("research_runs")
+        }
+        plan_columns = {
+            item["name"] for item in inspect(old_engine).get_columns("research_plans")
+        }
+        report_columns = {
+            item["name"] for item in inspect(old_engine).get_columns("reports")
+        }
+        with old_engine.connect() as connection:
+            run_values = connection.exec_driver_sql(
+                "SELECT report_language, report_language_source FROM research_runs "
+                "WHERE id = 'legacy'"
+            ).one()
+            plan_values = connection.exec_driver_sql(
+                "SELECT risk_level FROM research_plans WHERE run_id = 'legacy'"
+            ).one()
+            reference_heading = connection.exec_driver_sql(
+                "SELECT reference_heading FROM reports WHERE run_id = 'legacy'"
+            ).scalar_one()
+
+        self.assertIn("report_language", run_columns)
+        self.assertIn("research_domains", plan_columns)
+        self.assertIn("risk_level", plan_columns)
+        self.assertIn("reference_heading", report_columns)
+        self.assertEqual(tuple(run_values), ("zh-CN", "legacy"))
+        self.assertEqual(tuple(plan_values), ("standard",))
+        self.assertEqual(reference_heading, "参考文献")
         old_engine.dispose()
 
     def test_get_progress_returns_only_new_events(self):

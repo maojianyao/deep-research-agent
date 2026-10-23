@@ -26,7 +26,6 @@ logger = get_logger(__name__)
 
 class EvidenceReviewerAgent:
     """审核候选证据，并由应用层绑定不可被模型伪造的来源和任务 ID。"""
-    _ROLE = RoleContext(user_role=RoleAgent.REVIEWER)
     _BATCH_SIZE = 8  # 每次结构化调用承载的候选数：输入 ≈ 批内候选 × (正文窗口 + 摘录窗口)
     _SOURCE_CHARS = 1200  # 审查视角的正文窗口：足以判断摘录是否断章取义
     _EXCERPT_CHARS = 600
@@ -44,12 +43,16 @@ class EvidenceReviewerAgent:
         async with self._semaphore:
             return await factory()
 
-    async def run(self, task: ResearchTask, candidates: list[CandidateEvidence]) -> list[EvidenceCard]:
+    async def run(self, task: ResearchTask, candidates: list[CandidateEvidence],
+                  report_language: str = "zh-CN", plan=None) -> list[EvidenceCard]:
         """批量审查并返回可被综合器引用的 EvidenceCard 列表。"""
         if not candidates:
             return []
         batches = [candidates[i:i + self._BATCH_SIZE] for i in range(0, len(candidates), self._BATCH_SIZE)]
-        results = await asyncio.gather(*(self._review_batch(task, batch) for batch in batches))
+        results = await asyncio.gather(*(
+            self._review_batch(task, batch, report_language, plan)
+            for batch in batches
+        ))
         cards: list[EvidenceCard] = []
         for batch, assessments in results:
             for candidate, assessment in zip(batch, assessments):
@@ -65,16 +68,23 @@ class EvidenceReviewerAgent:
 
     async def _review_batch(self, task: ResearchTask,
                             batch: list[CandidateEvidence],
+                            report_language: str = "zh-CN",
+                            plan=None,
                             ) -> tuple[list[CandidateEvidence], list[EvidenceAssessment]]:
         """审查单批候选；单批失败按 insufficient 降级，不阻断整体流水线。"""
         payload = json.dumps({
             "task": {"id": task.id, "question": task.question, "task_type": task.task_type,
                      "acceptance_criteria": [truncate_text(item, 200) for item in task.acceptance_criteria]},
+            "research_profile": {
+                "domains": list(getattr(plan, "research_domains", []) or []),
+                "risk_level": getattr(plan, "risk_level", "standard") or "standard",
+            },
             "candidates": [self._compact(item) for item in batch],
         }, ensure_ascii=False)
         try:
+            role = RoleContext(user_role=RoleAgent.REVIEWER, report_language=report_language)
             result: EvidenceAssessmentBatch = await self._bounded(
-                partial(_ainvoke, self.agent, self._ROLE, payload))
+                partial(_ainvoke, self.agent, role, payload))
             assessments = list(result.items)
         except Exception as e:
             logger.error("审查批次失败，%d 条候选按 insufficient 降级：%s", len(batch), e)

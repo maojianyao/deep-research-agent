@@ -24,8 +24,6 @@ logger = get_logger(__name__)
 
 class PlannerAgent:
     """将原始请求转化为有验收条件的 ResearchPlan；支持 Critic 补证后的增量规划。"""
-    _ROLE = RoleContext(user_role=RoleAgent.PLANNER)
-    _SUPPLEMENT_ROLE = RoleContext(user_role=RoleAgent.PLANNER, mode="supplement")
     _INPUT_BUDGET_TOKENS = PLANNER_SUPPLEMENT_INPUT_BUDGET_TOKENS
 
     def __init__(self, model: BaseChatModel):
@@ -40,13 +38,15 @@ class PlannerAgent:
                                              response_format=ToolStrategy(SupplementPlanDraft),
                                              )
 
-    async def run(self, user_request: str) -> ResearchPlan:
+    async def run(self, user_request: str, report_language: str = "zh-CN") -> ResearchPlan:
         """生成研究计划；不在此阶段检索或输出结论。"""
         logger.info(f"研究topic：{user_request}")
-        return (await _ainvoke(self.agent, self._ROLE, user_request,)).to_plan()
+        role = RoleContext(user_role=RoleAgent.PLANNER, report_language=report_language)
+        return (await _ainvoke(self.agent, role, user_request,)).to_plan()
 
     async def run_supplement(self, user_request: str, critique: CriticReview,
-                             findings: list[Finding], evidence: list[EvidenceCard]) -> list[ResearchTask]:
+                             findings: list[Finding], evidence: list[EvidenceCard],
+                             report_language: str = "zh-CN") -> list[ResearchTask]:
         """Critic 判定需补证后的增量规划：只返回新增任务，由编排器合并进现有计划。"""
         finding_items = [item.to_digest().model_dump() for item in findings]
         evidence_items = [item.to_digest().model_dump(mode="json") for item in evidence]
@@ -63,5 +63,10 @@ class PlannerAgent:
             "existing_findings": finding_items,
             "evidence": evidence_items,
         }, ensure_ascii=False)
-        draft: SupplementPlanDraft = await _ainvoke(self.supplement_agent, self._SUPPLEMENT_ROLE, payload)
+        role = RoleContext(
+            user_role=RoleAgent.PLANNER,
+            mode="supplement",
+            report_language=report_language,
+        )
+        draft: SupplementPlanDraft = await _ainvoke(self.supplement_agent, role, payload)
         return [item.to_task() for item in draft.tasks]

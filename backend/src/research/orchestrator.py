@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 
 from backend.src.research.agents import CriticAgent, EvidenceReviewerAgent, PlannerAgent, ResearcherAgent, WriterAgent, \
     SynthesizerAgent
+from backend.src.research.language import is_verified_language, language_matches
 from backend.src.research.schemas import EvidenceCard, Finding, ResearchRun, ResearchTask, RunStatus
 from backend.src.utils.logger import get_logger
 
@@ -39,7 +40,9 @@ class ResearchOrchestrator:
             if research.status is RunStatus.PLANNING:
                 if research.plan is None:
                     logger.info(f"开始生成研究计划。。。")
-                    research.plan = await self.planner.run(research.user_request)
+                    research.plan = await self.planner.run(
+                        research.user_request, research.report_language
+                    )
                     research.event("研究计划已生成")
                     logger.info(f"\n\n规划agent：第 {count} 次生成计划\n"
                                 f"用户输入的主题：{research.user_request}\n"
@@ -48,9 +51,17 @@ class ResearchOrchestrator:
                     # Critic 补证回路：转交规划 Agent 基于审稿意见做增量补证规划
                     logger.info(f"开始增量补证规划。。。")
                     new_tasks = await self.planner.run_supplement(
-                        research.user_request, research.critique, research.findings, research.evidence)
+                        research.user_request, research.critique, research.findings,
+                        research.evidence, research.report_language,
+                    )
                     existing_questions = {task.question for task in research.plan.tasks}
                     new_tasks = [task for task in new_tasks if task.question not in existing_questions]
+                    if not new_tasks and all(task.completed for task in research.plan.tasks):
+                        research.status = RunStatus.NEEDS_HUMAN_REVIEW
+                        research.event("补证规划未产生新任务，且无可用结论写作，需人工复核")
+                        await self._persist(research)
+                        count += 1
+                        continue
                     research.plan.tasks.extend(new_tasks)
                     research.critique = None
                     research.event(f"补证规划已生成 {len(new_tasks)} 个新任务")
@@ -65,7 +76,9 @@ class ResearchOrchestrator:
                 logger.info(f"开始进行证据审查。。。")
                 if research.critique is None or research.critique.iteration != research.iteration:
                     research.critique = await self.critic.run(
-                        research.findings, research.evidence, research.plan)
+                        research.findings, research.evidence, research.plan,
+                        research.report_language,
+                    )
                 else:
                     research.event(f"从已保存的第 {research.iteration} 轮审稿结果继续")
                 research.critique.iteration = research.iteration
@@ -79,14 +92,39 @@ class ResearchOrchestrator:
                 logger.info(f"开始进行三阶段报告写作。。。")
                 findings = self._writable_findings(research)
                 if not findings:
-                    research.status = RunStatus.NEEDS_HUMAN_REVIEW
-                    research.event("无可用结论可写作，需人工复核")
-                    logger.info(f"\n无可用结论可写作\n")
+                    # A round limit is not a useful writing state when Critic approved
+                    # no findings. Extend once and let the normal supplement loop retry.
+                    if (
+                        research.critique is not None
+                        and research.iteration >= research.max_iterations
+                    ):
+                        previous_max = research.max_iterations
+                        research.max_iterations = max(
+                            research.max_iterations, research.iteration
+                        ) + 1
+                        research.status = RunStatus.PLANNING
+                        research.event(
+                            f"无可用结论可写作，自动增加 1 轮补证"
+                            f"（{previous_max} → {research.max_iterations}）"
+                        )
+                        logger.info(
+                            "无可用结论可写作，自动扩展研究轮次：%s → %s",
+                            previous_max,
+                            research.max_iterations,
+                        )
+                    else:
+                        research.status = RunStatus.NEEDS_HUMAN_REVIEW
+                        research.event("无可用结论可写作，需人工复核")
+                        logger.info(f"\n无可用结论可写作\n")
+                    await self._persist(research)
+                    count += 1
                     continue
                 task_questions = {task.id: task.question for task in research.plan.tasks} if research.plan else {}
                 try:
                     report = await self.writer.run(
-                        research.user_request, findings, research.evidence, task_questions)
+                        research.user_request, findings, research.evidence, task_questions,
+                        report_language=research.report_language, plan=research.plan,
+                    )
                 except Exception as e:
                     logger.error("报告综合写作失败，不生成拼接版替代：%s", e, exc_info=True)
                     research.status = RunStatus.FAILED
@@ -94,8 +132,42 @@ class ResearchOrchestrator:
                 else:
                     research.report = report
                     valid = self.writer.citations_are_valid(report, research.evidence)
-                    research.status = RunStatus.COMPLETED if valid else RunStatus.FAILED
-                    research.event("报告已生成" if valid else "引用校验失败")
+                    language_ok = self._report_language_is_valid(report, research)
+                    if valid and not language_ok:
+                        research.event(
+                            f"报告未使用 {research.report_language}，执行一次定向语言重写"
+                        )
+                        try:
+                            repaired = await self.writer.run(
+                                research.user_request, findings, research.evidence,
+                                task_questions,
+                                report_language=research.report_language,
+                                language_feedback=(
+                                    "上一版报告未遵守目标报告语言。保留证据、引用、"
+                                    "论证与结构，只校正所有面向读者的叙述和标题。"
+                                ),
+                                plan=research.plan,
+                            )
+                        except Exception as e:
+                            logger.error("报告语言重写失败：%s", e, exc_info=True)
+                        else:
+                            research.report = repaired
+                            report = repaired
+                            valid = self.writer.citations_are_valid(repaired, research.evidence)
+                            language_ok = self._report_language_is_valid(
+                                repaired, research
+                            )
+                    if not valid:
+                        research.status = RunStatus.FAILED
+                        research.event("引用校验失败")
+                    elif not language_ok:
+                        research.status = RunStatus.NEEDS_HUMAN_REVIEW
+                        research.event(
+                            f"报告未通过 {research.report_language} 输出语言校验，需人工复核"
+                        )
+                    else:
+                        research.status = RunStatus.COMPLETED
+                        research.event("报告已生成")
                     logger.info("\n写作agent已完成写作\n")
             else:
                 research.status = RunStatus.FAILED
@@ -132,8 +204,10 @@ class ResearchOrchestrator:
                     f"{pending_json}")
 
         async def process(task: ResearchTask) -> None:
-            candidates = await self.researcher.run(task)
-            reviewed = await self.reviewer.run(task, candidates)
+            candidates = await self.researcher.run(task, research.report_language)
+            reviewed = await self.reviewer.run(
+                task, candidates, research.report_language, research.plan
+            )
             supported = [item for item in reviewed if item.verdict in {"supported", "partially_supported"}]
             return task, candidates, reviewed, supported
 
@@ -152,7 +226,7 @@ class ResearchOrchestrator:
                 item.iteration = research.iteration
             research.candidates.extend(candidates)
             research.evidence.extend(item for item in reviewed if item.verdict in {"supported", "partially_supported"})
-            findings = await self._synthesize_findings(task, supported)
+            findings = await self._synthesize_findings(task, supported, research)
             for item in findings:
                 item.iteration = research.iteration
             research.findings.extend(findings)
@@ -182,11 +256,17 @@ class ResearchOrchestrator:
                         f"初步结论：{findings_json}")
         research.event(f"完成第 {research.iteration} 轮检索")
 
-    async def _synthesize_findings(self, task: ResearchTask, supported: list[EvidenceCard]) -> list[Finding]:
+    async def _synthesize_findings(self, task: ResearchTask, supported: list[EvidenceCard],
+                                   research: ResearchRun | None = None) -> list[Finding]:
         """仅接受综合 Agent 形成的结论；失败时保留证据并等待补证/人工处理。"""
         if not supported:
             return []
-        finding = await self.synthesizer.run(task, supported)
+        if research is None:
+            finding = await self.synthesizer.run(task, supported)
+        else:
+            finding = await self.synthesizer.run(
+                task, supported, research.report_language, research.plan
+            )
         if finding is not None:
             return [finding]
         logger.warning("任务 %s 有证据但未能形成可追溯综合结论", task.id)
@@ -226,3 +306,13 @@ class ResearchOrchestrator:
             return []
         approved_ids = set(research.critique.approved_finding_ids)
         return [item for item in research.findings if item.id in approved_ids]
+
+    @staticmethod
+    def _report_language_is_valid(report, research: ResearchRun) -> bool:
+        """Validate final output language for new runs; legacy fixtures remain compatible."""
+        if research.report_language_source == "legacy":
+            return True
+        if not is_verified_language(research.report_language):
+            return True
+        text = "\n".join([report.title, *(f"{item.heading}\n{item.text}" for item in report.blocks)])
+        return language_matches(text, research.report_language)

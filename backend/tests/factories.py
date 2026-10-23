@@ -125,8 +125,12 @@ def make_section(**overrides) -> SectionDraft:
 def make_summary(**overrides) -> SummaryDraft:
     values = {
         "executive_summary": "Example summary",
+        "executive_summary_heading": "执行摘要",
         "conclusion": "Example conclusion",
+        "conclusion_heading": "结论与建议",
         "limitations": "Example limitations",
+        "limitations_heading": "不确定性与局限",
+        "reference_heading": "参考文献",
     }
     values.update(overrides)
     return SummaryDraft(**values)

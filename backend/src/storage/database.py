@@ -26,17 +26,45 @@ def create_db_engine(url: str | None = None) -> Engine:
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     columns = {column["name"] for column in inspect(engine).get_columns("research_runs")}
+    plan_columns = {
+        column["name"] for column in inspect(engine).get_columns("research_plans")
+    }
     tables = set(inspect(engine).get_table_names())
     follow_up_columns = (
         {column["name"] for column in inspect(engine).get_columns("follow_up_threads")}
         if "follow_up_threads" in tables else set()
     )
+    report_columns = {
+        column["name"] for column in inspect(engine).get_columns("reports")
+    }
     with engine.begin() as connection:
         if "resume_status" not in columns:
             connection.execute(text("ALTER TABLE research_runs ADD COLUMN resume_status VARCHAR(32)"))
         if "resume_iteration" not in columns:
             connection.execute(text(
                 "ALTER TABLE research_runs ADD COLUMN resume_iteration INTEGER NOT NULL DEFAULT 0"
+            ))
+        if "report_language" not in columns:
+            connection.execute(text(
+                "ALTER TABLE research_runs ADD COLUMN report_language VARCHAR(64) NOT NULL DEFAULT 'zh-CN'"
+            ))
+        if "report_language_source" not in columns:
+            connection.execute(text(
+                "ALTER TABLE research_runs ADD COLUMN report_language_source VARCHAR(20) "
+                "NOT NULL DEFAULT 'legacy'"
+            ))
+        if "research_domains" not in plan_columns:
+            connection.execute(text(
+                "ALTER TABLE research_plans ADD COLUMN research_domains JSON"
+            ))
+        if "risk_level" not in plan_columns:
+            connection.execute(text(
+                "ALTER TABLE research_plans ADD COLUMN risk_level VARCHAR(20) "
+                "NOT NULL DEFAULT 'standard'"
+            ))
+        if "reference_heading" not in report_columns:
+            connection.execute(text(
+                "ALTER TABLE reports ADD COLUMN reference_heading TEXT NOT NULL DEFAULT '参考文献'"
             ))
         if follow_up_columns and "is_minimized" not in follow_up_columns:
             connection.execute(text(

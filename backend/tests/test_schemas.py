@@ -52,12 +52,16 @@ class SchemaConversionTests(unittest.TestCase):
         draft = ResearchPlanDraft(
             research_question="Question",
             scope="Scope",
+            research_domains=["medicine", "policy"],
+            risk_level="high",
             tasks=[ResearchTaskDraft(question="One"), ResearchTaskDraft(question="Two")],
         )
         plan = draft.to_plan()
         self.assertEqual(len(plan.tasks), 2)
         self.assertNotEqual(plan.tasks[0].id, plan.tasks[1].id)
         self.assertEqual(plan.research_question, "Question")
+        self.assertEqual(plan.research_domains, ["medicine", "policy"])
+        self.assertEqual(plan.risk_level, "high")
 
     def test_source_ref_omits_content(self):
         doc = make_source()

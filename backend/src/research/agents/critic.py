@@ -21,7 +21,6 @@ logger = get_logger(__name__)
 
 class CriticAgent:
     """独立挑战已有结论，决定是否需要继续补证。"""
-    _ROLE = RoleContext(user_role=RoleAgent.CRITIC)
     _INPUT_BUDGET_TOKENS = CRITIC_INPUT_BUDGET_TOKENS
 
     def __init__(self, model: BaseChatModel):
@@ -32,13 +31,16 @@ class CriticAgent:
                                   )
 
     async def run(self, findings: list[Finding], evidence: list[EvidenceCard],
-                  plan: ResearchPlan | None = None) -> CriticReview:
+                  plan: ResearchPlan | None = None,
+                  report_language: str = "zh-CN") -> CriticReview:
         """对照研究目标、任务完成情况和紧凑证据视图给出闸门决策。"""
         finding_items = [item.to_digest().model_dump() for item in findings]
         evidence_items = [item.to_digest().model_dump(mode="json") for item in evidence]
         research_plan = None if plan is None else {
             "research_question": truncate_text(plan.research_question, 500),
             "scope": truncate_text(plan.scope, 1000),
+            "research_domains": list(plan.research_domains),
+            "risk_level": plan.risk_level,
             "tasks": [{
                 "id": task.id,
                 "question": truncate_text(task.question, 300),
@@ -59,4 +61,5 @@ class CriticAgent:
             render=lambda item: json.dumps(item, ensure_ascii=False))
         payload = json.dumps({"research_plan": research_plan,
                               "findings": finding_items, "evidence": evidence_items}, ensure_ascii=False)
-        return await _ainvoke(self.agent, self._ROLE, payload)
+        role = RoleContext(user_role=RoleAgent.CRITIC, report_language=report_language)
+        return await _ainvoke(self.agent, role, payload)

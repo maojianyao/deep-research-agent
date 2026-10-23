@@ -21,7 +21,6 @@ logger = get_logger(__name__)
 
 class SynthesizerAgent:
     """将同一任务的合格证据综合为连贯结论；失败时返回 None，不伪造结论。"""
-    _ROLE = RoleContext(user_role=RoleAgent.SYNTHESIZER)
     _INPUT_BUDGET_TOKENS = SYNTHESIZER_INPUT_BUDGET_TOKENS
     _EXCERPT_CHARS = 800
 
@@ -33,7 +32,8 @@ class SynthesizerAgent:
                                   )
         self._semaphore = asyncio.Semaphore(max_concurrent_syntheses)
 
-    async def run(self, task: ResearchTask, evidence: list[EvidenceCard]) -> Finding | None:
+    async def run(self, task: ResearchTask, evidence: list[EvidenceCard],
+                  report_language: str = "zh-CN", plan=None) -> Finding | None:
         """综合单任务证据为一条连贯结论；调用失败或引用无效时返回 None。"""
         if not evidence:
             return None
@@ -43,11 +43,16 @@ class SynthesizerAgent:
                                             render=lambda item: json.dumps(item, ensure_ascii=False))
         payload = json.dumps({
             "task": {"id": task.id, "question": task.question, "task_type": task.task_type},
+            "research_profile": {
+                "domains": list(getattr(plan, "research_domains", []) or []),
+                "risk_level": getattr(plan, "risk_level", "standard") or "standard",
+            },
             "evidence": evidence_items,
         }, ensure_ascii=False)
         try:
             async with self._semaphore:
-                draft: FindingDraft = await _ainvoke(self.agent, self._ROLE, payload)
+                role = RoleContext(user_role=RoleAgent.SYNTHESIZER, report_language=report_language)
+                draft: FindingDraft = await _ainvoke(self.agent, role, payload)
         except Exception as e:
             logger.warning("任务 %s 结论综合失败，交由编排器保留证据并处理：%s", task.id, e)
             return None
