@@ -509,6 +509,7 @@ class ResearchApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/research-runs/not-found").status_code, 404)
         self.assertEqual(self.client.get("/api/research-runs/not-found/progress").status_code, 404)
         self.assertEqual(self.client.get("/api/research-runs", params={"status": "bogus"}).status_code, 422)
+        self.assertEqual(self.client.get("/api/research-runs", params={"sort": "bogus"}).status_code, 422)
         self.assertEqual(self.client.post("/api/research-runs", json={"user_request": ""}).status_code, 422)
 
 

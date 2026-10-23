@@ -181,7 +181,8 @@ class ResearchRunRepository:
         return run.id
 
     def list_runs(self, limit: int = 50, offset: int = 0,
-                  status: str | None = None, search: str | None = None) -> list[dict]:
+                  status: str | None = None, search: str | None = None,
+                  sort: str = "updated_desc") -> list[dict]:
         """Return lightweight rows for the frontend research list."""
         query = (
             select(
@@ -214,11 +215,15 @@ class ResearchRunRepository:
             .outerjoin(ReportModel, ReportModel.run_id == ResearchRunModel.id)
         )
         query = self._run_filters(query, status, search)
-        query = query.order_by(ResearchRunModel.updated_at.desc(), ResearchRunModel.id.desc())
+        if sort == "updated_asc":
+            query = query.order_by(ResearchRunModel.updated_at.asc(), ResearchRunModel.id.asc())
+        else:
+            query = query.order_by(ResearchRunModel.updated_at.desc(), ResearchRunModel.id.desc())
         query = query.limit(limit).offset(offset)
         with Session(self.engine) as session:
             return [{
                 **row._asdict(),
+                "has_report": row.title is not None,
                 "can_resume": row.status != "completed" and (
                     bool(row.resume_status)
                     or row.status == "paused"

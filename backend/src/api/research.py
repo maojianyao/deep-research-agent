@@ -321,16 +321,20 @@ def list_research_runs(
     page_size: int = Query(default=20, ge=1, le=100),
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, min_length=1, max_length=200),
+    sort: str = Query(default="updated_desc"),
 ):
     valid_statuses = {item.value for item in RunStatus} | {"active"}
     if status_filter and status_filter not in valid_statuses:
         raise HTTPException(status_code=422, detail="Invalid research status")
+    if sort not in {"updated_desc", "updated_asc"}:
+        raise HTTPException(status_code=422, detail="Invalid research sort")
     repository: ResearchRunRepository = request.app.state.repository
     rows = repository.list_runs(
         limit=page_size,
         offset=(page - 1) * page_size,
         status=status_filter,
         search=search,
+        sort=sort,
     )
     total = repository.count_runs(status=status_filter, search=search)
     items = []
@@ -348,6 +352,7 @@ def list_research_runs(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "sort": sort,
         "summary": {
             "total": repository.count_runs(),
             "active": repository.count_runs(status="active"),

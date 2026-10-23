@@ -69,14 +69,36 @@ function listResponse(items = []) {
   });
 }
 
+function runSummary(status, overrides = {}) {
+  return {
+    id: `run_${status}`,
+    user_request: `Research request for ${status}`,
+    report_language: "zh-CN",
+    report_language_name: "简体中文",
+    report_language_quality: "verified",
+    report_direction: "ltr",
+    status,
+    can_resume: status === "paused",
+    unfinished_tasks: 0,
+    iteration: 1,
+    max_iterations: 3,
+    created_at: "2026-10-22T10:00:00",
+    updated_at: "2026-10-22T10:00:00",
+    research_question: "Question",
+    title: status === "completed" ? "Completed report" : null,
+    has_report: status === "completed",
+    ...overrides,
+  };
+}
+
 function routeFetch(runs) {
   return vi.fn(async (url) => {
     const path = String(url);
     if (path.startsWith("/api/research-runs?")) {
       return listResponse(runs.map((run) => ({
         ...run,
-        research_question: run.plan.research_question,
-        title: run.report?.title,
+        research_question: run.plan?.research_question || run.research_question,
+        title: run.report?.title || run.title,
         unfinished_tasks: 0,
       })));
     }
@@ -137,6 +159,44 @@ describe("research workspace overview", () => {
 
     expect(activeFilter.attributes("aria-pressed")).toBe("true");
     expect(requests.at(-1)).toContain("status=active");
+  });
+
+  test("leads with research tasks and shows actions for each task state", async () => {
+    const requests = [];
+    const items = [
+      runSummary("completed"),
+      runSummary("researching"),
+      runSummary("needs_human_review"),
+    ];
+    globalThis.fetch = vi.fn(async (url) => {
+      requests.push(String(url));
+      return listResponse(items);
+    });
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+
+    const register = wrapper.find(".research-register");
+    const guide = wrapper.find("[data-research-guide]");
+    expect(register.exists()).toBe(true);
+    expect(guide.exists()).toBe(true);
+    expect(
+      register.element.compareDocumentPosition(guide.element)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(wrapper.find(".home-brief").text()).not.toContain("研究如何推进");
+
+    const rows = wrapper.findAll(".register-table tbody tr");
+    expect(rows[0].find(".row-menu").text()).toContain("删除");
+    expect(rows[0].text()).toContain("下载");
+    expect(rows[1].text()).toContain("结束任务");
+    expect(rows[2].text()).toContain("查看待复核");
+
+    await wrapper.find('select[aria-label="研究档案排序"]').setValue("updated_asc");
+    await flushPromises();
+    expect(requests.at(-1)).toContain("sort=updated_asc");
   });
 });
 

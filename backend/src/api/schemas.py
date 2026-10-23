@@ -72,6 +72,7 @@ class ResearchRunSummary(BaseModel):
     updated_at: datetime
     research_question: str | None = None
     title: str | None = None
+    has_report: bool = False
 
 
 class ResearchRunList(BaseModel):
@@ -80,6 +81,7 @@ class ResearchRunList(BaseModel):
     page: int
     page_size: int
     summary: "ResearchRunSummaryCounts"
+    sort: str = "updated_desc"
 
 
 class ResearchRunSummaryCounts(BaseModel):

@@ -7,6 +7,7 @@ const terminal = new Set(["completed", "failed", "needs_human_review", "cancelle
 export const useResearchStore = defineStore("research", {
   state: () => ({
     runs: [], total: 0, page: 1, pageSize: 20, search: "", statusFilter: "",
+    sort: "updated_desc",
     summary: { total: 0, active: 0, completed: 0, needs_human_review: 0 },
     runId: null, run: null, eventSequence: 0, eventSource: null, pollTimer: null,
     listTimer: null, connection: "connecting", loading: false, error: "",
@@ -31,6 +32,7 @@ export const useResearchStore = defineStore("research", {
       const params = new URLSearchParams({ page: this.page, page_size: this.pageSize });
       if (this.statusFilter) params.set("status", this.statusFilter);
       if (this.search.trim()) params.set("search", this.search.trim());
+      params.set("sort", this.sort);
       try {
         const data = await api(`/research-runs?${params}`);
         this.runs = data.items;
@@ -297,6 +299,7 @@ export const useResearchStore = defineStore("research", {
       this.followUpReconnectTimer = null;
     },
     selectStatus(value) { this.statusFilter = value; this.page = 1; this.loadRuns(); },
+    selectSort(value) { this.sort = value; this.page = 1; this.loadRuns(); },
     selectPage(value) { this.page = value; this.loadRuns(); },
     clearRun() {
       this.closeLiveUpdates();

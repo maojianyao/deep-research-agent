@@ -18,15 +18,28 @@
           @input="store.setSearch($event.target.value)"
         />
       </label>
-      <div class="filter-strip" aria-label="研究状态筛选">
-        <button
-          v-for="filter in filters"
-          :key="filter.label"
-          class="filter-button"
-          :class="{ 'is-active': store.statusFilter === filter.value }"
-          :aria-pressed="store.statusFilter === filter.value"
-          @click="store.selectStatus(filter.value)"
-        >{{ filter.label }}</button>
+      <div class="register-controls">
+        <label class="sort-control">
+          <span>排序</span>
+          <select
+            aria-label="研究档案排序"
+            :value="store.sort"
+            @change="store.selectSort($event.target.value)"
+          >
+            <option value="updated_desc">最近更新</option>
+            <option value="updated_asc">最早更新</option>
+          </select>
+        </label>
+        <div class="filter-strip" aria-label="研究状态筛选">
+          <button
+            v-for="filter in filters"
+            :key="filter.label"
+            class="filter-button"
+            :class="{ 'is-active': store.statusFilter === filter.value }"
+            :aria-pressed="store.statusFilter === filter.value"
+            @click="store.selectStatus(filter.value)"
+          >{{ filter.label }}</button>
+        </div>
       </div>
     </div>
 
@@ -42,7 +55,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="run in store.runs" :key="run.id">
+          <tr
+            v-for="run in store.runs"
+            :key="run.id"
+            class="research-row"
+            tabindex="0"
+            @click="openRow($event, run.id)"
+            @keydown.enter.self="openRow($event, run.id)"
+          >
             <td data-label="研究主题">
               <p class="topic-title">{{ run.title || run.research_question || run.user_request }}</p>
               <p class="topic-request">{{ run.user_request }}</p>
@@ -56,15 +76,20 @@
             <td data-label="更新时间" class="whitespace-nowrap">{{ dateText(run.updated_at) }}</td>
             <td data-label="操作">
               <div class="row-actions">
-                <button class="line-action" @click="$emit('open', run.id)">查看</button>
-                <button v-if="isActive(run.status)" class="line-action is-warning" @click="$emit('finish', run)">结束任务</button>
-                <button v-else-if="run.can_resume || canContinue(run)" class="line-action" @click="$emit('continue', run)">继续任务</button>
-                <button
-                  class="line-action is-danger"
-                  :disabled="isActive(run.status)"
-                  :title="isActive(run.status) ? '请先结束正在执行的任务' : '删除该研究记录及其关联数据'"
-                  @click="$emit('delete', run)"
-                >删除</button>
+                <button class="line-action" @click.stop="$emit('open', run.id)">查看</button>
+                <button v-if="isActive(run.status)" class="line-action is-warning" @click.stop="$emit('finish', run)">结束任务</button>
+                <button v-else-if="run.status === 'needs_human_review'" class="line-action is-warning" @click.stop="$emit('open', run.id)">查看待复核</button>
+                <button v-else-if="run.can_resume || canContinue(run)" class="line-action" @click.stop="$emit('continue', run)">继续任务</button>
+                <a v-if="run.has_report" class="line-action" :href="`/api/research-runs/${run.id}/report.md`" @click.stop>下载</a>
+                <details class="row-menu" @click.stop>
+                  <summary :aria-label="`更多操作：${run.title || run.user_request}`">•••</summary>
+                  <button
+                    class="line-action is-danger"
+                    :disabled="isActive(run.status)"
+                    :title="isActive(run.status) ? '请先结束正在执行的任务' : '删除该研究记录及其关联数据'"
+                    @click.stop="$emit('delete', run)"
+                  >删除</button>
+                </details>
               </div>
             </td>
           </tr>
@@ -90,7 +115,7 @@
 import { useResearchStore } from "../stores/research";
 
 const store = useResearchStore();
-defineEmits(["open", "finish", "continue", "delete"]);
+const emit = defineEmits(["open", "finish", "continue", "delete"]);
 
 const filters = [
   { label: "全部", value: "" },
@@ -114,6 +139,10 @@ const statuses = {
 const statusText = (status) => statuses[status] || status;
 const isActive = (status) => !["paused", "completed", "failed", "needs_human_review", "cancelled"].includes(status);
 const canContinue = (run) => run.can_resume || ["paused", "failed"].includes(run.status);
+const openRow = (event, runId) => {
+  if (event.target.closest("button, a, summary, details, input, select")) return;
+  emit("open", runId);
+};
 const statusTone = (status) => {
   if (status === "completed") return "is-complete";
   if (["needs_human_review", "failed"].includes(status)) return "is-alert";

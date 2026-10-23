@@ -40,6 +40,8 @@
             <button class="primary-action shrink-0" @click="openCreateDialog"><span aria-hidden="true">＋</span>新建研究</button>
           </section>
 
+          <ResearchList @open="openRun" @finish="finishRun" @continue="continueRun" @delete="deleteRun" />
+
           <section class="workspace-ledger" aria-label="研究任务总览">
             <div class="ledger-metric"><span class="metric-label">全部研究</span><strong class="metric-value">{{ store.summary.total }}</strong><span class="metric-note">工作区中的研究档案</span></div>
             <div class="ledger-metric"><span class="metric-label">正在推进</span><strong class="metric-value">{{ store.summary.active }}</strong><span class="metric-note is-warm">全工作区持续更新</span></div>
@@ -47,8 +49,14 @@
             <div class="ledger-metric"><span class="metric-label">等待判断</span><strong class="metric-value">{{ store.summary.needs_human_review }}</strong><span class="metric-note is-alert">全工作区需人工复核</span></div>
           </section>
 
-          <WorkflowDiagram id="workflow" />
-          <ResearchList @open="openRun" @finish="finishRun" @continue="continueRun" @delete="deleteRun" />
+          <details id="workflow" data-research-guide class="home-guide">
+            <summary>
+              <span>了解研究如何推进</span>
+              <span>从任务拆解到证据核验，共六个阶段</span>
+              <span class="fold-chevron" aria-hidden="true">⌄</span>
+            </summary>
+            <WorkflowDiagram />
+          </details>
         </template>
 
         <section v-else class="run-dossier">
