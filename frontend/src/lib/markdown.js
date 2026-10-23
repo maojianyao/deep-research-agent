@@ -18,24 +18,24 @@ marked.use({
       const indexes = [
         source.indexOf("("),
         source.indexOf("（"),
-        source.search(/\b(?:evidence|finding)_[a-zA-Z0-9]+/),
+        source.search(/\b(?:evidence|finding)_[a-zA-Z0-9_]+/),
       ].filter((index) => index >= 0);
       return indexes.length ? Math.min(...indexes) : undefined;
     },
     tokenizer(source) {
       const code = /^(`+)[^`\n]+\1/.exec(source);
       if (code) return;
-      const grouped = /^[（(]((?:evidence|finding)_[a-zA-Z0-9]+[^）)]*)[）)]/.exec(source);
+      const grouped = /^[（(]((?:evidence|finding)_[a-zA-Z0-9_]+[^）)]*)[）)]/.exec(source);
       if (grouped) {
         return {
           type: "researchCitation",
           raw: grouped[0],
-          ids: grouped[1].match(/(?:evidence|finding)_[a-zA-Z0-9]+/g),
-          note: grouped[1].replace(/(?:evidence|finding)_[a-zA-Z0-9]+/g, "").replace(/[，,、;；\s]+/g, " ").trim(),
+          ids: grouped[1].match(/(?:evidence|finding)_[a-zA-Z0-9_]+/g),
+          note: grouped[1].replace(/(?:evidence|finding)_[a-zA-Z0-9_]+/g, "").replace(/[，,、;；\s]+/g, " ").trim(),
         };
       }
 
-      const bare = /^(?:evidence|finding)_[a-zA-Z0-9]+\b/.exec(source);
+      const bare = /^(?:evidence|finding)_[a-zA-Z0-9_]+\b/.exec(source);
       if (!bare) return;
       return {
         type: "researchCitation",

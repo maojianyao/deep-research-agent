@@ -80,8 +80,7 @@ const currentStage = computed(() => definitions[
   Math.min(activeIndex.value, definitions.length - 1)
 ]);
 const supplementalRound = computed(() => (
-  props.run.iteration > 1
-  || (props.run.events || []).some((event) => /补证|补充检索/.test(event.message))
+  (props.run.events || []).some((event) => /补证|补充检索/.test(event.message))
 ));
 const totalTasks = computed(() => props.run.plan?.tasks?.length || 0);
 const completedTasks = computed(

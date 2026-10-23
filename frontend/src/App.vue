@@ -183,7 +183,13 @@
                   class="dossier-panel"
                 >
                   <div class="dossier-panel-heading"><h2>综合结论</h2><span>{{ store.run.findings.length }} 条</span></div>
-                  <div class="finding-list"><article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry"><div class="finding-topline"><button class="reference-chip" @click="openCitationTrace(finding.id)">{{ finding.classification }} / 引用 {{ citationLabel(finding.id) }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div><p class="finding-text">{{ finding.statement }}</p><div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click="openCitationTrace(id)">[{{ citationLabel(id) }}]</button></div></article></div>
+                  <div class="finding-list" @click="handleInlineCitation">
+                    <article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry">
+                      <div class="finding-topline"><button class="reference-chip" @click.stop="openCitationTrace(finding.id)">{{ finding.classification }} / 引用 {{ citationLabel(finding.id) }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div>
+                      <div class="finding-text" v-html="renderCitedMarkdown(finding.statement)"></div>
+                      <div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click.stop="openCitationTrace(id)">[{{ citationLabel(id) }}]</button></div>
+                    </article>
+                  </div>
                   <p v-if="!store.run.findings.length" class="empty-note">当前还没有已综合的结论。</p>
                 </section>
 
@@ -195,7 +201,7 @@
                   class="dossier-panel"
                 >
                   <div class="dossier-panel-heading"><h2>审稿意见</h2><span>{{ store.run.critiques.length }} 轮</span></div>
-                  <div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="openCitationTrace(issue.finding_id)">[{{ citationLabel(issue.finding_id) }}]</button></p></article></div>
+                  <div class="critique-list" @click="handleInlineCitation"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / <span v-html="renderCitedMarkdown(issue.problem)"></span> <button v-if="issue.finding_id" class="reference-link" @click.stop="openCitationTrace(issue.finding_id)">[{{ citationLabel(issue.finding_id) }}]</button></p></article></div>
                   <p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p>
                 </section>
 
@@ -302,6 +308,7 @@ import CreateResearchDialog from "./components/CreateResearchDialog.vue";
 import EvidenceLibrary from "./components/EvidenceLibrary.vue";
 import ResearchStagePanel from "./components/ResearchStagePanel.vue";
 import { buildCitationContext } from "./lib/citations";
+import { safeMarkdown } from "./lib/markdown";
 
 const store = useResearchStore();
 const createDialog = ref(null);
@@ -329,7 +336,13 @@ const toastError = ref(false);
 let toastTimer;
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
 const citationContext = computed(
-  () => buildCitationContext(store.run?.report?.markdown || ""),
+  () => buildCitationContext(
+    store.run?.report?.markdown || "",
+    [
+      ...(store.run?.evidence || []).map((item) => item.id),
+      ...(store.run?.findings || []).map((item) => item.id),
+    ],
+  ),
 );
 const dossierTabs = computed(() => [
   { id: "report", label: "研究报告", count: store.run?.report ? "正文" : "未生成" },
@@ -371,6 +384,13 @@ function statusClass(status) {
 }
 function citationLabel(referenceId) {
   return citationContext.value.labels[referenceId] || "未引用";
+}
+function renderCitedMarkdown(value) {
+  return safeMarkdown(value || "", { citationLabels: citationContext.value.labels });
+}
+function handleInlineCitation(event) {
+  const citation = event.target.closest?.(".citation-id");
+  if (citation) openCitationTrace(citation.dataset.ref);
 }
 function notify(message, error = false) {
   toastMessage.value = message;

@@ -46,6 +46,17 @@ describe("research stage panel", () => {
     expect(wrapper.findAll("[data-stage-state='complete']")).toHaveLength(2);
   });
 
+  test("does not infer a supplemental round from iteration count alone", () => {
+    const wrapper = mount(ResearchStagePanel, {
+      props: {
+        run: run({ iteration: 2 }),
+      },
+    });
+
+    expect(wrapper.find("[data-current-stage]").text()).toContain("跨源检索");
+    expect(wrapper.text()).not.toContain("第 2 轮补证");
+  });
+
   test("keeps the saved checkpoint visible while paused", () => {
     const wrapper = mount(ResearchStagePanel, {
       props: {

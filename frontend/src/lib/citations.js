@@ -1,4 +1,4 @@
-const citationPattern = /(?:evidence|finding)_[A-Za-z0-9]+/g;
+const citationPattern = /(?:evidence|finding)_[A-Za-z0-9_]+/g;
 
 function prose(markdown) {
   return String(markdown || "")
@@ -6,7 +6,7 @@ function prose(markdown) {
     .replace(/`[^`\n]*`/g, "");
 }
 
-export function buildCitationContext(markdown) {
+export function buildCitationContext(markdown, fallbackIds = []) {
   const labels = {};
   const occurrences = {};
   let next = 1;
@@ -20,6 +20,9 @@ export function buildCitationContext(markdown) {
       label,
       offset: match.index,
     });
+  }
+  for (const referenceId of fallbackIds) {
+    if (!labels[referenceId]) labels[referenceId] = String(next++);
   }
   return { labels, occurrences };
 }

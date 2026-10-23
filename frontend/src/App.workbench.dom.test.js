@@ -374,4 +374,52 @@ describe("research run navigation", () => {
     expect(wrapper.find("#dossier-tab-report").attributes("aria-selected")).toBe("true");
     expect(wrapper.find("[data-report-body]").isVisible()).toBe(true);
   });
+
+  test("uses readable citation numbers in synthesis findings", async () => {
+    const run = completedRun("run_findings_trace");
+    run.report.markdown = "# Report\n\nNo direct citation in prose.";
+    run.evidence = [{
+      id: "evidence_finding_trace",
+      task_id: "task_1",
+      iteration: 1,
+      claim: "Finding evidence",
+      excerpt: "Source excerpt",
+      verdict: "supported",
+      confidence: 0.9,
+      limitations: [],
+      source: {
+        url: "https://example.com/finding",
+        title: "Finding source",
+        publisher: "Publisher",
+        published_at: "2026-01-01",
+        source_type: "official",
+        language: "en",
+      },
+    }];
+    run.findings = [{
+      id: "finding_trace",
+      task_id: "task_1",
+      iteration: 1,
+      statement: "Finding statement (evidence_finding_trace).",
+      classification: "fact",
+      confidence: 0.9,
+      caveats: [],
+      evidence_ids: ["evidence_finding_trace"],
+    }];
+    globalThis.fetch = routeFetch([run]);
+    window.history.replaceState({}, "", "/?run=run_findings_trace");
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await wrapper.find("#dossier-tab-findings").trigger("click");
+    const finding = wrapper.find(".finding-text");
+    expect(finding.text()).not.toContain("evidence_finding_trace");
+    expect(finding.find('.citation-id[data-ref="evidence_finding_trace"]').text()).toBe("1");
+    expect(wrapper.find(".reference-chip").text()).toContain("引用");
+    expect(wrapper.find(".reference-chip").text()).not.toContain("finding_trace");
+  });
 });
