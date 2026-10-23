@@ -37,6 +37,9 @@ def init_db(engine: Engine) -> None:
     report_columns = {
         column["name"] for column in inspect(engine).get_columns("reports")
     }
+    source_columns = {
+        column["name"] for column in inspect(engine).get_columns("source_documents")
+    }
     with engine.begin() as connection:
         if "resume_status" not in columns:
             connection.execute(text("ALTER TABLE research_runs ADD COLUMN resume_status VARCHAR(32)"))
@@ -69,4 +72,8 @@ def init_db(engine: Engine) -> None:
         if follow_up_columns and "is_minimized" not in follow_up_columns:
             connection.execute(text(
                 "ALTER TABLE follow_up_threads ADD COLUMN is_minimized BOOLEAN NOT NULL DEFAULT 1"
+            ))
+        if "language" not in source_columns:
+            connection.execute(text(
+                "ALTER TABLE source_documents ADD COLUMN language VARCHAR(64)"
             ))

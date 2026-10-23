@@ -107,6 +107,7 @@ class StorageRepositoryTests(unittest.TestCase):
         self.assertEqual(saved.evidence[0].id, "evidence_storage")
         self.assertEqual(saved.evidence[0].iteration, 1)
         self.assertEqual(saved.evidence[0].source.url, str(run.evidence[0].source.url))
+        self.assertEqual(saved.evidence[0].source.language, "en")
         self.assertEqual(saved.findings[0].evidence[0].id, "evidence_storage")
         self.assertEqual(saved.findings[0].iteration, 1)
         self.assertEqual(len(saved.critiques), 2)

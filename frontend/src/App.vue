@@ -187,7 +187,7 @@
                 </section>
 
                 <section
-                  v-else
+                  v-else-if="activeDossierTab === 'critiques'"
                   id="dossier-panel-critiques"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-critiques"
@@ -196,6 +196,16 @@
                   <div class="dossier-panel-heading"><h2>审稿意见</h2><span>{{ store.run.critiques.length }} 轮</span></div>
                   <div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="showCitation(issue.finding_id)">{{ issue.finding_id }}</button></p></article></div>
                   <p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p>
+                </section>
+
+                <section
+                  v-else
+                  id="dossier-panel-evidence"
+                  role="tabpanel"
+                  aria-labelledby="dossier-tab-evidence"
+                  class="dossier-panel"
+                >
+                  <EvidenceLibrary :run-id="store.run.id" :focus-evidence-id="focusedEvidenceId" />
                 </section>
               </div>
 
@@ -213,6 +223,12 @@
                 <section class="margin-card">
                   <div class="margin-card-head"><h2>审查通过的证据</h2><span>{{ store.run.evidence.length }} 条</span></div>
                   <div class="evidence-list"><article v-for="item in store.run.evidence.slice(0,10)" :key="item.id" class="evidence-entry"><p class="evidence-claim">{{ item.claim }}</p><a class="evidence-source" :href="item.source.url" target="_blank" rel="noopener noreferrer">↗ {{ item.source.title }}</a><p class="evidence-meta">{{ item.source.publisher || item.source.source_type }} / {{ Math.round(item.confidence * 100) }}%</p><button class="evidence-link" @click="showCitation(item.id)">{{ item.id }}</button></article><p v-if="!store.run.evidence.length" class="empty-note">证据审查后会在此显示。</p></div>
+                  <button
+                    v-if="store.run.evidence.length"
+                    type="button"
+                    class="evidence-library-entry"
+                    @click="activeDossierTab = 'evidence'"
+                  >查看全部 {{ store.run.evidence.length }} 条证据</button>
                 </section>
               </aside>
             </div>
@@ -281,6 +297,7 @@ import ReportView from "./components/ReportView.vue";
 import CitationDialog from "./components/CitationDialog.vue";
 import FollowUpPanel from "./components/FollowUpPanel.vue";
 import CreateResearchDialog from "./components/CreateResearchDialog.vue";
+import EvidenceLibrary from "./components/EvidenceLibrary.vue";
 
 const store = useResearchStore();
 const createDialog = ref(null);
@@ -298,6 +315,7 @@ const windowHeight = ref(window.innerHeight);
 const activeDossierTab = ref("report");
 const reportHeadings = ref([]);
 const activeHeadingId = ref("");
+const focusedEvidenceId = ref("");
 const creating = ref(false);
 const createError = ref("");
 const runLoading = ref(false);
@@ -315,6 +333,7 @@ const dossierTabs = computed(() => [
   },
   { id: "findings", label: "综合结论", count: `${store.run?.findings?.length || 0} 条` },
   { id: "critiques", label: "审稿意见", count: `${store.run?.critiques?.length || 0} 轮` },
+  { id: "evidence", label: "审查证据", count: `${store.run?.evidence?.length || 0} 条` },
 ]);
 const activeHeadingLabel = computed(
   () => reportHeadings.value.find((heading) => heading.id === activeHeadingId.value)?.text || "",
@@ -596,6 +615,7 @@ watch(() => store.runId, () => {
   activeDossierTab.value = "report";
   reportHeadings.value = [];
   activeHeadingId.value = "";
+  focusedEvidenceId.value = "";
   clearReportInteraction();
 });
 watch(activeDossierTab, (tab) => {

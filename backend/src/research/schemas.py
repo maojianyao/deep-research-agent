@@ -117,6 +117,7 @@ class SourceDocument(BaseModel):
     publisher: str | None = Field(default=None, description="发布机构或作者；缺失时保留 null。")
     published_at: str | None = Field(default=None, description="来源声明的发布日期，暂以原字符串保留。")
     source_type: str = Field(default="unknown", description="official、primary、academic 等来源分类。")
+    language: str | None = Field(default=None, description="来源原文的规范语言标签。")
     content: str = Field(min_length=1, description="已获取的原始正文；为空的材料不可作为证据。")
 
 

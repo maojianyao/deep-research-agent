@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from backend.main import create_app
 from backend.src.research.schemas import ResearchRun, RunStatus
 from backend.src.storage import create_db_engine
+from backend.tests.factories import make_evidence, make_source
 from backend.tests.test_storage import make_persisted_run
 
 
@@ -157,6 +158,78 @@ class ResearchApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(
             f"/api/research-runs/{other_run.id}/references/{run.evidence[0].id}"
         ).status_code, 404)
+
+    def test_evidence_library_returns_all_evidence_with_filters_and_facets(self):
+        run = make_persisted_run("_library")
+        run.evidence = [
+            make_evidence(
+                "evidence_library_en",
+                task_id=run.plan.tasks[0].id,
+                claim="OpenAI governance analysis",
+                confidence=0.91,
+                source=make_source(
+                    "https://example.com/english",
+                    title="OpenAI governance analysis source",
+                    source_type="academic",
+                    language="en",
+                ),
+            ),
+            make_evidence(
+                "evidence_library_ja",
+                task_id=run.plan.tasks[0].id,
+                claim="日本語の政策分析",
+                confidence=0.88,
+                source=make_source(
+                    "https://example.com/japanese",
+                    title="日本語の政策分析",
+                    source_type="official",
+                    language="ja",
+                ),
+            ),
+            make_evidence(
+                "evidence_library_zh",
+                task_id=run.plan.tasks[0].id,
+                claim="中文政策资料",
+                confidence=0.74,
+                verdict="partially_supported",
+                source=make_source(
+                    "https://example.com/chinese",
+                    title="中文政策资料",
+                    source_type="government",
+                    language="zh-CN",
+                ),
+            ),
+        ]
+        self.app.state.repository.save_run(run)
+
+        all_evidence = self.client.get(
+            f"/api/research-runs/{run.id}/evidence",
+            params={"page_size": 2},
+        )
+        filtered = self.client.get(
+            f"/api/research-runs/{run.id}/evidence",
+            params={
+                "search": "OpenAI",
+                "source_type": "academic",
+                "language": "en",
+                "min_confidence": 0.9,
+                "verdict": "supported",
+            },
+        )
+
+        self.assertEqual(all_evidence.status_code, 200, all_evidence.text)
+        self.assertEqual(all_evidence.json()["total"], 3)
+        self.assertEqual(len(all_evidence.json()["items"]), 2)
+        self.assertEqual(all_evidence.json()["facets"]["source_types"], [
+            "academic", "government", "official",
+        ])
+        self.assertEqual(all_evidence.json()["facets"]["languages"], [
+            "en", "ja", "zh-CN",
+        ])
+        self.assertEqual(filtered.status_code, 200, filtered.text)
+        self.assertEqual(filtered.json()["total"], 1)
+        self.assertEqual(filtered.json()["items"][0]["id"], "evidence_library_en")
+        self.assertEqual(filtered.json()["items"][0]["source"]["language"], "en")
 
     def test_create_returns_accepted_and_starts_background_run(self):
         with self.client:

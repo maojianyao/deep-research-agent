@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Engine, exists, func, select
+from sqlalchemy import Engine, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.src.research.schemas import (
     CandidateEvidence, CriticIssue, CriticReview, EvidenceCard, Finding, ReportBlock,
     ReportDraft, ResearchPlan, ResearchRun, ResearchTask, RunStatus, SourceDocument,
 )
+from backend.src.research.language import detect_language
 from backend.src.utils.documents import normalize_url
 
 from .models import (
     CandidateEvidenceModel, CriticIssueModel, CriticReviewModel, EvidenceCardModel,
     FindingModel, ReportBlockModel, ReportModel, ResearchPlanModel, ResearchRunModel,
-    ResearchTaskModel, RunEventModel, SourceDocumentModel,
+    ResearchTaskModel, RunEventModel, SourceDocumentModel, finding_evidence,
 )
 
 ACTIVE_RESEARCH_STATUSES = (
@@ -380,6 +381,113 @@ class ResearchRunRepository:
                 "urls": urls,
             }
 
+    def list_evidence(
+        self,
+        run_id: str,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+        source_type: str | None = None,
+        language: str | None = None,
+        verdict: str | None = None,
+        min_confidence: float | None = None,
+    ) -> dict | None:
+        """Return one run's evidence with filterable, paginated source metadata."""
+        with Session(self.engine) as session:
+            if session.get(ResearchRunModel, run_id) is None:
+                return None
+            filters = [EvidenceCardModel.run_id == run_id]
+            if search:
+                filters.append(or_(
+                    EvidenceCardModel.claim.contains(search, autoescape=True),
+                    EvidenceCardModel.excerpt.contains(search, autoescape=True),
+                    SourceDocumentModel.title.contains(search, autoescape=True),
+                ))
+            if source_type:
+                filters.append(SourceDocumentModel.source_type == source_type)
+            if language:
+                filters.append(SourceDocumentModel.language == language)
+            if verdict:
+                filters.append(EvidenceCardModel.verdict == verdict)
+            if min_confidence is not None:
+                filters.append(EvidenceCardModel.confidence >= min_confidence)
+
+            base_query = (
+                select(EvidenceCardModel)
+                .join(SourceDocumentModel, EvidenceCardModel.source_id == SourceDocumentModel.id)
+                .where(*filters)
+            )
+            total = session.scalar(
+                select(func.count())
+                .select_from(EvidenceCardModel)
+                .join(SourceDocumentModel, EvidenceCardModel.source_id == SourceDocumentModel.id)
+                .where(*filters)
+            ) or 0
+            rows = session.scalars(
+                base_query
+                .options(selectinload(EvidenceCardModel.source))
+                .order_by(EvidenceCardModel.confidence.desc(), EvidenceCardModel.id)
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            ).all()
+            items = []
+            for item in rows:
+                finding_ids = list(session.scalars(
+                    select(FindingModel.id)
+                    .join(finding_evidence, FindingModel.id == finding_evidence.c.finding_id)
+                    .where(finding_evidence.c.evidence_id == item.id)
+                    .order_by(FindingModel.id)
+                ))
+                items.append({
+                    "id": item.id,
+                    "task_id": item.task_id,
+                    "iteration": item.iteration,
+                    "claim": item.claim,
+                    "excerpt": item.excerpt,
+                    "locator": item.locator,
+                    "verdict": item.verdict,
+                    "confidence": item.confidence,
+                    "limitations": item.limitations or [],
+                    "source": {
+                        "url": item.source.url,
+                        "title": item.source.title,
+                        "publisher": item.source.publisher,
+                        "published_at": item.source.published_at,
+                        "source_type": item.source.source_type,
+                        "language": item.source.language,
+                    },
+                    "finding_ids": finding_ids,
+                })
+
+            metadata = session.execute(
+                select(
+                    SourceDocumentModel.source_type,
+                    SourceDocumentModel.language,
+                    EvidenceCardModel.verdict,
+                )
+                .select_from(EvidenceCardModel)
+                .join(SourceDocumentModel, EvidenceCardModel.source_id == SourceDocumentModel.id)
+                .where(EvidenceCardModel.run_id == run_id)
+            ).all()
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "facets": {
+                    "source_types": sorted({
+                        row.source_type for row in metadata if row.source_type
+                    }),
+                    "languages": sorted({
+                        row.language or "unknown" for row in metadata
+                    }),
+                    "verdicts": sorted({
+                        row.verdict for row in metadata if row.verdict
+                    }),
+                },
+            }
+
     @staticmethod
     def _run_filters(query, status: str | None, search: str | None):
         if status == "active":
@@ -454,6 +562,7 @@ class ResearchRunRepository:
                 publisher=item.publisher,
                 published_at=item.published_at,
                 source_type=item.source_type,
+                language=item.language,
                 content=item.content,
             )
 
@@ -533,10 +642,15 @@ class ResearchRunRepository:
     @staticmethod
     def _source(session: Session, source) -> SourceDocumentModel:
         url = normalize_url(str(source.url))
+        language = source.language or detect_language(
+            f"{source.title}\n{source.content[:2000]}"
+        )
         existing = session.scalar(
             select(SourceDocumentModel).where(SourceDocumentModel.url == url)
         )
         if existing is not None:
+            if language and not existing.language:
+                existing.language = language
             return existing
         model = SourceDocumentModel(
             url=url,
@@ -544,6 +658,7 @@ class ResearchRunRepository:
             publisher=source.publisher,
             published_at=source.published_at,
             source_type=source.source_type,
+            language=language,
             content=source.content,
         )
         session.add(model)

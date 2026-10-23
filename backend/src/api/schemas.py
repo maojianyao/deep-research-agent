@@ -97,6 +97,7 @@ class SourceView(BaseModel):
     publisher: str | None = None
     published_at: str | None = None
     source_type: str
+    language: str | None = None
 
 
 class TaskView(BaseModel):
@@ -135,6 +136,24 @@ class EvidenceView(CandidateView):
     verdict: str
     confidence: float
     limitations: list[str]
+
+
+class EvidenceLibraryItem(EvidenceView):
+    finding_ids: list[str] = Field(default_factory=list)
+
+
+class EvidenceLibraryFacets(BaseModel):
+    source_types: list[str]
+    languages: list[str]
+    verdicts: list[str]
+
+
+class EvidenceLibraryPage(BaseModel):
+    items: list[EvidenceLibraryItem]
+    total: int
+    page: int
+    page_size: int
+    facets: EvidenceLibraryFacets
 
 
 class FindingView(BaseModel):

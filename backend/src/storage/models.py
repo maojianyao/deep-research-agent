@@ -132,6 +132,7 @@ class SourceDocumentModel(Base):
     publisher: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[str | None] = mapped_column(String(40))
     source_type: Mapped[str] = mapped_column(String(40), nullable=False, default="unknown")
+    language: Mapped[str | None] = mapped_column(String(64))
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

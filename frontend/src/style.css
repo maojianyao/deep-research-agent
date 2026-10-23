@@ -456,6 +456,92 @@ dialog::backdrop { background: rgb(15 23 42 / .5); backdrop-filter: blur(2px); }
 .evidence-source { display: block; margin-top: 5px; color: var(--citation); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; text-decoration: none; }
 .evidence-meta { margin: 4px 0 0; color: var(--muted); font-size: 9px; }
 .evidence-link { margin-top: 5px; border: 0; border-bottom: 1px solid #b8cad8; background: transparent; padding: 0 0 1px; color: var(--citation); font-size: 9px; }
+.evidence-library-entry {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--moss);
+  font-size: 11px;
+  font-weight: 650;
+}
+.evidence-library { min-width: 0; }
+.evidence-library-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line-strong); padding: 4px 2px 15px; }
+.evidence-library-head h2 { margin: 3px 0 0; color: var(--ink-strong); font-family: var(--font-reading); font-size: 23px; }
+.evidence-library-head p:last-child { margin-top: 5px; color: var(--muted); font-size: 12px; }
+.evidence-library-head > strong { flex: none; color: var(--petrol); font-size: 20px; font-variant-numeric: tabular-nums; }
+.evidence-library-toolbar {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) repeat(4, minmax(120px, auto));
+  gap: 9px;
+  margin-top: 14px;
+}
+.evidence-library-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.evidence-library-toolbar input, .evidence-library-toolbar select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  padding: 0 9px;
+  color: var(--ink);
+  font-size: 11px;
+}
+.evidence-library-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; margin-top: 16px; }
+.evidence-library-grid:has(.evidence-detail) { grid-template-columns: minmax(0, 1fr) minmax(260px, 34%); align-items: start; }
+.evidence-results { display: grid; min-width: 0; gap: 9px; }
+.evidence-library-card { border: 1px solid var(--line); background: var(--surface); }
+.evidence-library-card button { display: grid; width: 100%; gap: 6px; border: 0; background: transparent; padding: 14px; text-align: left; }
+.evidence-library-card button:hover { background: #f4f8f3; }
+.evidence-library-card strong { color: var(--ink-strong); font-family: var(--font-reading); font-size: 15px; line-height: 1.55; }
+.evidence-library-card button > span:nth-child(3) { color: var(--citation); font-size: 11px; line-height: 1.5; }
+.evidence-library-card small { color: var(--muted); font-size: 10px; }
+.evidence-verdict {
+  width: fit-content;
+  border: 1px solid #bad0c2;
+  border-radius: 999px;
+  background: #e9f2eb;
+  padding: 2px 7px;
+  color: var(--success);
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 650;
+}
+.evidence-verdict.is-partial { border-color: #dcc9a4; background: #f7f0e2; color: var(--attention); }
+.evidence-empty { border: 1px dashed var(--line-strong); background: rgb(251 252 248 / .5); padding: 38px 20px; text-align: center; }
+.evidence-empty p { color: var(--muted); font-family: var(--font-reading); font-size: 14px; }
+.evidence-empty button { margin-top: 12px; }
+.evidence-pagination { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); font-size: 10px; }
+.evidence-pagination div { display: flex; gap: 6px; }
+.evidence-detail {
+  position: sticky;
+  top: 166px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  padding: 17px;
+}
+.evidence-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.evidence-detail-head button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+}
+.evidence-detail h3 { margin: 12px 0; color: var(--ink-strong); font-family: var(--font-reading); font-size: 17px; line-height: 1.55; }
+.evidence-detail-label { margin: 14px 0 6px; color: var(--muted); font-size: 10px; }
+.evidence-detail blockquote { margin: 0; border-left: 2px solid var(--citation); background: #f2f6f3; padding: 11px 12px; color: var(--ink); font-family: var(--font-reading); font-size: 13px; line-height: 1.75; }
+.evidence-detail dl { display: grid; gap: 9px; margin: 15px 0; }
+.evidence-detail dl > div { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; }
+.evidence-detail dt { color: var(--muted); font-size: 10px; }
+.evidence-detail dd { margin: 0; color: var(--ink); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.evidence-detail > a { display: inline-flex; min-height: 36px; align-items: center; border-bottom: 1px solid #b8cad8; color: var(--citation); font-size: 11px; text-decoration: none; }
 .home-guide { margin-top: 22px; border-top: 1px solid var(--line-strong); }
 .home-guide > summary {
   display: grid;
@@ -614,6 +700,10 @@ summary::-webkit-details-marker { display: none; }
   .ledger-metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .dossier-layout { grid-template-columns: 1fr; }
   .margin-rail { position: static; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .evidence-library-toolbar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .evidence-search { grid-column: 1 / -1; }
+  .evidence-library-grid:has(.evidence-detail) { grid-template-columns: 1fr; }
+  .evidence-detail { position: static; }
 }
 @media (max-width: 767px) {
   .research-spine { display: none; }
@@ -649,6 +739,8 @@ summary::-webkit-details-marker { display: none; }
   .report-outline-status { display: none; }
   .margin-rail { grid-template-columns: 1fr; }
   .report-sheet { margin-top: 12px; padding: 22px 18px; }
+  .evidence-library-toolbar { grid-template-columns: 1fr 1fr; }
+  .evidence-library-head { align-items: flex-start; }
 }
 @media (max-width: 560px) {
   .workspace-ledger { grid-template-columns: 1fr 1fr; }
