@@ -3,6 +3,8 @@
     ref="reportBody"
     data-report-body
     class="relative"
+    :lang="language || undefined"
+    :dir="direction || 'auto'"
     @click="handleCitation"
     @mouseup="captureSelection"
   >
@@ -50,6 +52,8 @@ const props = defineProps({
   active: Boolean,
   eligible: Boolean,
   followUps: { type: Array, default: () => [] },
+  language: { type: String, default: "" },
+  direction: { type: String, default: "auto" },
   expanded: { type: Boolean, default: true },
 });
 const emit = defineEmits(["citation", "selection", "selection-error", "restore-follow-up"]);

@@ -1,7 +1,7 @@
 <template>
   <aside
     data-follow-up-panel
-    class="fixed z-40 overflow-hidden border border-slate-200 bg-white shadow-2xl"
+    class="follow-up-panel fixed z-40 overflow-hidden border shadow-2xl"
     :class="narrow
       ? 'inset-x-0 bottom-0 h-[min(78vh,620px)] w-full rounded-t-2xl border-b-0'
       : 'bottom-auto right-4 top-20 h-[496px] w-[288px] rounded-2xl'"
@@ -10,10 +10,10 @@
     role="dialog"
     aria-modal="false"
   >
-    <header class="flex h-12 items-center justify-between border-b border-slate-100 px-3">
+    <header class="flex h-14 items-center justify-between border-b border-[var(--line)] px-4">
       <div>
-        <p class="text-[8px] font-bold tracking-[.14em] text-teal-800">FOLLOW-UP</p>
-        <h2 class="text-xs font-semibold">追问</h2>
+        <p class="text-[10px] text-[var(--moss)]">选中段落的追问</p>
+        <h2 class="reading-title mt-0.5 text-[16px] text-[var(--ink-strong)]">继续研究这一段</h2>
       </div>
       <div class="flex items-center gap-1">
         <button
@@ -37,9 +37,9 @@
       </div>
     </header>
 
-    <div class="flex h-[calc(100%-48px)] min-h-0 flex-col">
-      <div data-follow-up-messages class="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" aria-live="polite">
-        <blockquote data-selected-passage class="mr-7 rounded-xl bg-amber-50 px-3 py-2 text-[10px] leading-5 text-slate-700">
+    <div class="flex h-[calc(100%-56px)] min-h-0 flex-col">
+      <div data-follow-up-messages class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
+        <blockquote data-selected-passage class="reading-quote mr-8 rounded-xl border-l-2 border-[var(--citation)] bg-[#eef3ee] px-3 py-2.5 text-xs leading-6 text-[var(--ink)]">
           <p :class="passageExpanded ? '' : 'line-clamp-3'" class="whitespace-pre-wrap break-words">{{ passage }}</p>
           <button
             type="button"
@@ -56,37 +56,37 @@
           :class="message.role === 'user'
             ? 'ml-auto max-w-[84%]'
             : 'mr-7 max-w-[90%]'"
-          class="text-[10px] leading-5"
+          class="text-xs leading-5"
         >
           <div
             v-if="message.role === 'user'"
-            class="whitespace-pre-wrap break-words rounded-xl bg-amber-50 px-3 py-2 text-slate-700"
+            class="whitespace-pre-wrap break-words rounded-xl bg-[#e9f0eb] px-3 py-2.5 text-[var(--ink)]"
           >{{ message.content }}</div>
-          <div v-else class="markdown-content break-words rounded-xl bg-slate-50 px-3 py-2 text-slate-700" v-html="safeMarkdown(message.content)"></div>
+          <div v-else class="markdown-content break-words rounded-xl border border-[var(--line)] bg-[#f7f9f5] px-3 py-2.5 text-[var(--ink)]" v-html="safeMarkdown(message.content)"></div>
           <p
             v-if="message.role === 'assistant' && message.status !== 'completed'"
             data-message-status
-            class="mt-1 text-[9px]"
-            :class="message.status === 'generating' ? 'text-teal-700' : 'text-rose-700'"
+            class="mt-1 text-[10px]"
+            :class="message.status === 'generating' ? 'text-[var(--moss)]' : 'text-[var(--danger)]'"
           >
             {{ messageStatus(message.status) }}
           </p>
-          <p v-if="message.error_message" class="mt-1 text-[9px] text-rose-700">{{ message.error_message }}</p>
+          <p v-if="message.error_message" class="mt-1 text-[10px] text-[var(--danger)]">{{ message.error_message }}</p>
           <button
             v-if="message.role === 'assistant' && ['failed', 'interrupted'].includes(message.status)"
             type="button"
             data-retry-answer
-            class="mt-1 rounded-full border border-rose-200 bg-white px-2 py-1 text-[9px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+            class="mt-1 rounded-full border border-[#ddc3c3] bg-white px-2.5 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[#f7eceb] disabled:opacity-40"
             :disabled="busy"
             @click="$emit('retry', message.id)"
           >重试回答</button>
         </article>
 
-        <p v-if="busy && !messages.some((item) => item.status === 'generating')" class="text-[10px] text-teal-800" role="status">正在生成回答…</p>
-        <p v-if="error" class="rounded-xl bg-rose-50 px-3 py-2 text-[10px] text-rose-700" role="alert">{{ error }}</p>
+        <p v-if="busy && !messages.some((item) => item.status === 'generating')" class="text-[11px] text-[var(--moss)]" role="status">正在生成回答…</p>
+        <p v-if="error" class="rounded-xl bg-[#f7eceb] px-3 py-2 text-[11px] text-[var(--danger)]" role="alert">{{ error }}</p>
       </div>
 
-      <form class="border-t border-slate-100 p-2.5" @submit.prevent="submit">
+      <form class="border-t border-[var(--line)] p-3" @submit.prevent="submit">
         <label for="follow-up-question" class="sr-only">追问问题</label>
         <textarea
           id="follow-up-question"
@@ -95,19 +95,19 @@
           data-follow-up-input
           maxlength="2000"
           rows="2"
-          class="w-full resize-none rounded-xl border border-slate-200 p-2 text-[5px] leading-5 outline-none focus:border-teal-700"
+          class="w-full resize-none rounded-xl border border-[var(--line-strong)] p-2.5 text-xs leading-5 outline-none focus:border-[var(--moss)]"
           placeholder="继续提问..."
           @keydown.enter.exact.prevent="submit"
         ></textarea>
         <div class="mt-1.5 flex items-center justify-between">
-          <span class="text-[9px]" :class="tooLong ? 'font-semibold text-rose-700' : 'text-slate-400'">{{ questionLength }} / 2000</span>
+          <span class="text-[10px]" :class="tooLong ? 'font-semibold text-[var(--danger)]' : 'text-[var(--muted)]'">{{ questionLength }} / 2000</span>
           <button
             type="submit"
-            class="h-6 rounded-full bg-teal-800 px-3 text-[7px] font-semibold text-white disabled:opacity-40"
+            class="h-8 rounded-full bg-[var(--petrol)] px-4 text-[11px] font-semibold text-white disabled:opacity-40"
             :disabled="busy || !question.trim() || tooLong"
           >发送</button>
         </div>
-        <p v-if="tooLong" data-input-too-long class="mt-1 text-[9px] text-rose-700" role="alert">
+        <p v-if="tooLong" data-input-too-long class="mt-1 text-[10px] text-[var(--danger)]" role="alert">
           问题超过 2,000 个字符，无法发送，请缩短。
         </p>
       </form>

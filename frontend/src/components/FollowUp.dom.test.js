@@ -122,10 +122,10 @@ describe("report follow-up DOM", () => {
     expect(trigger.exists()).toBe(true);
     expect(trigger.text()).toContain("提问");
     expect(trigger.classes()).toContain("rounded-full");
-    expect(trigger.classes()).toContain("h-5");
-    expect(trigger.classes()).toContain("text-[5px]");
-    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("h-2.5");
-    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("w-2.5");
+    expect(trigger.classes()).toContain("h-7");
+    expect(trigger.classes()).toContain("text-[11px]");
+    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("h-3");
+    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("w-3");
 
     await trigger.trigger("click");
     await nextTick();
@@ -147,7 +147,7 @@ describe("report follow-up DOM", () => {
     expect(section.exists()).toBe(true);
     expect(section.element.open).toBe(false);
     expect(section.find("summary").text()).toContain("研究报告");
-    expect(section.find("summary").text()).toContain("引用编号可点击查看来源");
+    expect(section.find("summary").text()).toContain("引用编号可查看来源");
 
     section.find("summary").element.click();
     await section.trigger("toggle");
@@ -831,10 +831,10 @@ describe("report follow-up DOM", () => {
     expect(panel.find("[data-message-role='assistant']").classes()).toContain("max-w-[90%]");
     expect(panel.find("[data-message-role='assistant']").classes()).not.toContain("ml-auto");
     expect(panel.find("[data-follow-up-input]").classes()).toContain("rounded-xl");
-    expect(panel.find("[data-follow-up-input]").classes()).toContain("text-[5px]");
-    expect(panel.find("[data-follow-up-input]").attributes("placeholder")).toBe("继续提问");
+    expect(panel.find("[data-follow-up-input]").classes()).toContain("text-xs");
+    expect(panel.find("[data-follow-up-input]").attributes("placeholder")).toBe("继续提问...");
     expect(panel.find('button[type="submit"]').classes()).toContain("rounded-full");
-    expect(panel.find('button[type="submit"]').classes()).toContain("text-[7px]");
+    expect(panel.find('button[type="submit"]').classes()).toContain("text-[11px]");
     expect(panel.find('[aria-label="最小化追问"]').classes()).toContain("h-7");
     expect(panel.find("[data-delete-follow-up]").classes()).toContain("h-7");
     expect(panel.find("[data-passage-toggle]").exists()).toBe(true);

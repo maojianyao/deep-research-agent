@@ -118,10 +118,14 @@ export const useResearchStore = defineStore("research", {
       if (this.pollTimer) clearInterval(this.pollTimer);
       this.pollTimer = null;
     },
-    async createRun(userRequest, maxIterations) {
+    async createRun(userRequest, maxIterations, reportLanguage = "") {
       const result = await api("/research-runs", {
         method: "POST",
-        body: JSON.stringify({ user_request: userRequest, max_iterations: maxIterations }),
+        body: JSON.stringify({
+          user_request: userRequest,
+          max_iterations: maxIterations,
+          report_language: reportLanguage || null,
+        }),
       });
       await this.loadRuns();
       await this.openRun(result.id);
