@@ -378,6 +378,39 @@ describe("report follow-up DOM", () => {
     });
   });
 
+  test("MIT license selection inside a paragraph uses the backend canonical offset", async () => {
+    const markdown = [
+      "# 中国头部厂商的实际开放状况",
+      "",
+      "## 实际开放状况",
+      "",
+      "先看开放深度最高的一家。DeepSeek自2023年11月DeepSeek-Coder起持续发布开放权重（第三方综述，evidence_7fbabe5268ad，属二手），到R1阶段达到最宽松的一档：官方公告明确R1权重仓库公开、采用MIT许可、不限制商用、无需申请，并公开训练技术报告、允许蒸馏（evidence_e90a8b87c621）；GitHub仓库层面亦显示MIT许可并同步开源R1-Zero及六个蒸馏小模型（evidence_775cd88a30a2）。",
+    ].join("\n");
+    const wrapper = mount(ReportView, {
+      attachTo: document.body,
+      props: { markdown, active: false, eligible: true, followUps: [] },
+    });
+    const walker = document.createTreeWalker(
+      wrapper.find(".markdown-content").element,
+      NodeFilter.SHOW_TEXT,
+    );
+    let target = walker.nextNode();
+    while (target && !target.nodeValue.includes("采用MIT许可")) target = walker.nextNode();
+    const offset = target.nodeValue.indexOf("采用MIT许可");
+    const range = document.createRange();
+    range.setStart(target, offset);
+    range.setEnd(target, offset + "采用MIT许可".length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await wrapper.trigger("mouseup");
+    expect(wrapper.emitted("selection").at(-1)[0].anchor).toMatchObject({
+      text: "采用MIT许可",
+      start: 136,
+      end: 143,
+    });
+  });
+
   test("report renders multiple highlights, markers, and restores an overlapping selection", async () => {
     const rendered = "Example report Summary Summary text with key evidence (evidence_abc123).";
     const firstId = "followup_first";

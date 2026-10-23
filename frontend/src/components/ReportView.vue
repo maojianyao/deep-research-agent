@@ -97,9 +97,13 @@ function canonicalRangeText(range) {
   return normalizeSpace(canonicalRawRangeText(range));
 }
 
-function normalizeRangePrefix(value) {
+function normalizeRangePrefix(value, preserveTrailingSpace = true) {
   const normalized = normalizeSpace(value);
-  return normalized && /\s$/u.test(value.normalize("NFKC")) ? `${normalized} ` : normalized;
+  return normalized
+    && preserveTrailingSpace
+    && /\s$/u.test(value.normalize("NFKC"))
+    ? `${normalized} `
+    : normalized;
 }
 
 function endpointElement(node) {
@@ -112,7 +116,15 @@ function rangePart(root, boundary, boundaryOffset, fromStart) {
   if (fromStart) range.setEnd(boundary, boundaryOffset);
   else range.setStart(boundary, boundaryOffset);
   const text = canonicalRawRangeText(range);
-  return fromStart ? normalizeRangePrefix(text) : normalizeSpace(text);
+  if (!fromStart) return normalizeSpace(text);
+  const actualPrefix = boundary.nodeType === Node.TEXT_NODE
+    ? boundary.nodeValue.slice(0, boundaryOffset).normalize("NFKC")
+    : "";
+  const preserveTrailingSpace =
+    boundary.nodeType === Node.TEXT_NODE
+      ? boundaryOffset === 0 || /\s$/u.test(actualPrefix)
+      : true;
+  return normalizeRangePrefix(text, preserveTrailingSpace);
 }
 
 function clearSelection() {

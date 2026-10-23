@@ -165,6 +165,41 @@ class FollowUpThreadsApiTests(unittest.TestCase):
             ).json()
         self.assertEqual(restored["anchor"], first["anchor"])
 
+    def test_mit_license_selection_from_rendered_report_is_not_rejected(self):
+        run = make_persisted_run("_mit_selection")
+        run.report.title = "中国头部厂商的实际开放状况"
+        run.report.blocks = [ReportBlock(
+            heading="实际开放状况",
+            text=(
+                "先看开放深度最高的一家。DeepSeek自2023年11月DeepSeek-Coder起"
+                "持续发布开放权重（第三方综述，evidence_7fbabe5268ad，属二手），"
+                "到R1阶段达到最宽松的一档：官方公告明确R1权重仓库公开、"
+                "采用MIT许可、不限制商用、无需申请，并公开训练技术报告、"
+                "允许蒸馏（evidence_e90a8b87c621）；GitHub仓库层面亦显示MIT许可"
+                "并同步开源R1-Zero及六个蒸馏小模型（evidence_775cd88a30a2）。"
+            ),
+        )]
+        self.app.state.repository.save_run(run)
+
+        with TestClient(self.app) as client:
+            detail = client.get(f"/api/research-runs/{run.id}").json()
+            response = client.post(
+                f"/api/research-runs/{run.id}/follow-ups",
+                json={
+                    "anchor": {
+                        "text": "采用MIT许可",
+                        "start": 136,
+                        "end": 143,
+                        "prefix": "",
+                        "suffix": "",
+                        "report_digest": detail["report"]["anchor_digest"],
+                    },
+                    "question": "MIT许可是什么意思",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201, response.text)
+
     def _create(self, client, run_id, detail, text, start):
         response = self._post(client, run_id, detail, text, start, expected=201)
         return response.json()
