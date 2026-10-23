@@ -121,8 +121,10 @@ describe("report follow-up DOM", () => {
     expect(trigger.exists()).toBe(true);
     expect(trigger.text()).toContain("提问");
     expect(trigger.classes()).toContain("rounded-full");
-    expect(trigger.classes()).toContain("text-[9px]");
-    expect(trigger.find("[data-follow-up-trigger-icon]").exists()).toBe(true);
+    expect(trigger.classes()).toContain("h-5");
+    expect(trigger.classes()).toContain("text-[10px]");
+    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("h-2.5");
+    expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("w-2.5");
 
     await trigger.trigger("click");
     await nextTick();
@@ -757,11 +759,57 @@ describe("report follow-up DOM", () => {
     await nextTick();
 
     const panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.classes()).toContain("w-[288px]");
+    expect(panel.classes()).toContain("h-[496px]");
+    expect(panel.classes()).toContain("rounded-2xl");
     expect(panel.text()).toContain("请解释这一段。");
     expect(panel.find("strong").text()).toBe("安全答案");
     expect(panel.find("script").exists()).toBe(false);
     expect(panel.text()).not.toContain("alert('xss')");
+    expect(panel.text()).not.toContain("你");
+    expect(panel.text()).not.toContain("助手");
+    const quote = panel.find("[data-follow-up-messages] [data-selected-passage]");
+    expect(quote.exists()).toBe(true);
+    expect(quote.text()).toContain("Summary text");
+    expect(panel.find("[data-message-role='user']").classes()).toContain("ml-auto");
+    expect(panel.find("[data-message-role='assistant']").classes()).toContain("max-w-[90%]");
+    expect(panel.find("[data-message-role='assistant']").classes()).not.toContain("ml-auto");
+    expect(panel.find("[data-follow-up-input]").classes()).toContain("rounded-xl");
+    expect(panel.find('button[type="submit"]').classes()).toContain("rounded-full");
+    expect(panel.find('[aria-label="最小化追问"]').classes()).toContain("h-7");
+    expect(panel.find("[data-delete-follow-up]").classes()).toContain("h-7");
+    expect(panel.find("[data-passage-toggle]").exists()).toBe(true);
     expect(document.activeElement).toBe(panel.find("[data-follow-up-input]").element);
+  });
+
+  test("report highlight has underline styling and minimized marker stays fixed at 18px", async () => {
+    const thread = {
+      id: "followup_style",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [],
+    };
+    const wrapper = mount(ReportView, {
+      attachTo: document.body,
+      props: {
+        markdown: completedRun().report.markdown,
+        active: false,
+        eligible: true,
+        followUps: [thread],
+      },
+    });
+    await nextTick();
+
+    const highlight = wrapper.find("[data-follow-up-highlight]");
+    expect(highlight.classes()).toContain("border-b-2");
+    expect(highlight.classes()).toContain("border-emerald-500");
+    const marker = wrapper.find("[data-follow-up-marker]");
+    expect(marker.classes()).toContain("fixed");
+    expect(marker.classes()).toContain("h-[18px]");
+    expect(marker.classes()).toContain("w-[18px]");
   });
 
   test("failed answer shows an error and retry replaces the same assistant response", async () => {

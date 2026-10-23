@@ -17,8 +17,10 @@
         :key="`${highlight.threadId}-${index}`"
         data-follow-up-highlight
         :data-thread-id="highlight.threadId"
-        class="absolute rounded-sm"
-        :class="highlight.minimized ? 'bg-emerald-300/25' : 'bg-amber-300/35'"
+        class="absolute rounded-sm border-b-2"
+        :class="highlight.minimized
+          ? 'border-emerald-500 bg-emerald-300/25'
+          : 'border-amber-500 bg-amber-300/35'"
         :style="highlight.style"
         aria-hidden="true"
       ></span>
@@ -28,7 +30,7 @@
         type="button"
         data-follow-up-marker
         :data-thread-id="marker.threadId"
-        class="pointer-events-auto absolute grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-emerald-600 text-[9px] font-bold text-white shadow-sm hover:bg-emerald-700"
+        class="pointer-events-auto fixed z-30 grid h-[18px] w-[18px] place-items-center rounded-full border-2 border-white bg-emerald-600 text-[8px] font-bold text-white shadow-sm hover:bg-emerald-700"
         :style="marker.style"
         title="恢复追问"
         aria-label="恢复追问"
@@ -288,14 +290,11 @@ function rebuildOverlays() {
       const first = rects[0] || fallback;
       const left = Math.max(
         2,
-        Math.min(first.right - base.left + 3, (base.width || window.innerWidth) - 22),
+        Math.min(first.right + 3, window.innerWidth - 20),
       );
       const top = Math.max(
         2,
-        Math.min(
-          first.top - base.top - 2,
-          (base.height || window.innerHeight) - 22,
-        ),
+        Math.min(first.top - 2, window.innerHeight - 20),
       );
       nextMarkers.push({
         threadId: thread.id,
@@ -321,7 +320,11 @@ watch(
 );
 onMounted(() => {
   window.addEventListener("resize", scheduleOverlays);
+  window.addEventListener("scroll", scheduleOverlays, true);
   rebuildOverlays();
 });
-onUnmounted(() => window.removeEventListener("resize", scheduleOverlays));
+onUnmounted(() => {
+  window.removeEventListener("resize", scheduleOverlays);
+  window.removeEventListener("scroll", scheduleOverlays, true);
+});
 </script>
