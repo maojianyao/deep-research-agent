@@ -407,7 +407,11 @@ class ResearchRunRepository:
             if source_type:
                 filters.append(SourceDocumentModel.source_type == source_type)
             if language:
-                filters.append(SourceDocumentModel.language == language)
+                filters.append(
+                    SourceDocumentModel.language.is_(None)
+                    if language == "unknown"
+                    else SourceDocumentModel.language == language
+                )
             if verdict:
                 filters.append(EvidenceCardModel.verdict == verdict)
             if min_confidence is not None:
@@ -433,32 +437,7 @@ class ResearchRunRepository:
             ).all()
             items = []
             for item in rows:
-                finding_ids = list(session.scalars(
-                    select(FindingModel.id)
-                    .join(finding_evidence, FindingModel.id == finding_evidence.c.finding_id)
-                    .where(finding_evidence.c.evidence_id == item.id)
-                    .order_by(FindingModel.id)
-                ))
-                items.append({
-                    "id": item.id,
-                    "task_id": item.task_id,
-                    "iteration": item.iteration,
-                    "claim": item.claim,
-                    "excerpt": item.excerpt,
-                    "locator": item.locator,
-                    "verdict": item.verdict,
-                    "confidence": item.confidence,
-                    "limitations": item.limitations or [],
-                    "source": {
-                        "url": item.source.url,
-                        "title": item.source.title,
-                        "publisher": item.source.publisher,
-                        "published_at": item.source.published_at,
-                        "source_type": item.source.source_type,
-                        "language": item.source.language,
-                    },
-                    "finding_ids": finding_ids,
-                })
+                items.append(self._evidence_item(session, item))
 
             metadata = session.execute(
                 select(
@@ -487,6 +466,50 @@ class ResearchRunRepository:
                     }),
                 },
             }
+
+    def get_evidence(self, run_id: str, evidence_id: str) -> dict | None:
+        """Return one evidence item for a citation outside the current result page."""
+        with Session(self.engine) as session:
+            if session.get(ResearchRunModel, run_id) is None:
+                return None
+            item = session.scalar(
+                select(EvidenceCardModel)
+                .options(selectinload(EvidenceCardModel.source))
+                .where(
+                    EvidenceCardModel.run_id == run_id,
+                    EvidenceCardModel.id == evidence_id,
+                )
+            )
+            return self._evidence_item(session, item) if item is not None else None
+
+    @staticmethod
+    def _evidence_item(session: Session, item: EvidenceCardModel) -> dict:
+        finding_ids = list(session.scalars(
+            select(FindingModel.id)
+            .join(finding_evidence, FindingModel.id == finding_evidence.c.finding_id)
+            .where(finding_evidence.c.evidence_id == item.id)
+            .order_by(FindingModel.id)
+        ))
+        return {
+            "id": item.id,
+            "task_id": item.task_id,
+            "iteration": item.iteration,
+            "claim": item.claim,
+            "excerpt": item.excerpt,
+            "locator": item.locator,
+            "verdict": item.verdict,
+            "confidence": item.confidence,
+            "limitations": item.limitations or [],
+            "source": {
+                "url": item.source.url,
+                "title": item.source.title,
+                "publisher": item.source.publisher,
+                "published_at": item.source.published_at,
+                "source_type": item.source.source_type,
+                "language": item.source.language,
+            },
+            "finding_ids": finding_ids,
+        }
 
     @staticmethod
     def _run_filters(query, status: str | None, search: str | None):

@@ -231,6 +231,28 @@ class ResearchApiTests(unittest.TestCase):
         self.assertEqual(filtered.json()["items"][0]["id"], "evidence_library_en")
         self.assertEqual(filtered.json()["items"][0]["source"]["language"], "en")
 
+    def test_evidence_library_opens_one_evidence_outside_the_current_page(self):
+        run = make_persisted_run("_library_detail")
+        linked_evidence_id = run.findings[0].evidence_ids[0]
+        run.evidence = [
+            make_evidence(
+                linked_evidence_id if index == 1 else f"evidence_library_{index}",
+                task_id=run.plan.tasks[0].id,
+                claim=f"Evidence claim {index}",
+            )
+            for index in range(3)
+        ]
+        self.app.state.repository.save_run(run)
+
+        response = self.client.get(
+            f"/api/research-runs/{run.id}/evidence/{linked_evidence_id}"
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], linked_evidence_id)
+        self.assertEqual(response.json()["claim"], "Evidence claim 1")
+        self.assertEqual(response.json()["finding_ids"], [run.findings[0].id])
+
     def test_create_returns_accepted_and_starts_background_run(self):
         with self.client:
             response = self.client.post("/api/research-runs", json={

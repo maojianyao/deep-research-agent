@@ -20,8 +20,8 @@ from backend.src.services.follow_up import report_anchor_digest
 from backend.src.storage.repository import ACTIVE_RESEARCH_STATUSES, ResearchRunRepository
 from backend.src.utils.logger import get_logger
 from .schemas import (
-    AcceptedResearchRun, CitationReferenceView, CreateResearchRun, EvidenceLibraryPage,
-    PreviewReportLanguage, ReportLanguagePreview, ResearchProgress,
+    AcceptedResearchRun, CitationReferenceView, CreateResearchRun, EvidenceLibraryItem,
+    EvidenceLibraryPage, PreviewReportLanguage, ReportLanguagePreview, ResearchProgress,
     ResearchRunDetail, ResearchRunList,
 )
 
@@ -399,6 +399,14 @@ def list_research_evidence(
     if result is None:
         raise HTTPException(status_code=404, detail="Research run not found")
     return result
+
+
+@router.get("/{run_id}/evidence/{evidence_id}", response_model=EvidenceLibraryItem)
+def get_research_evidence(run_id: str, evidence_id: str, request: Request):
+    item = request.app.state.repository.get_evidence(run_id, evidence_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    return item
 
 
 @router.get("/{run_id}/progress", response_model=ResearchProgress)
