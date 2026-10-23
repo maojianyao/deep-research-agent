@@ -96,7 +96,7 @@
           maxlength="2000"
           rows="2"
           class="w-full resize-none rounded-xl border border-slate-200 p-2 text-[5px] leading-5 outline-none focus:border-teal-700"
-          placeholder="继续提问"
+          placeholder="继续提问..."
           @keydown.enter.exact.prevent="submit"
         ></textarea>
         <div class="mt-1.5 flex items-center justify-between">
