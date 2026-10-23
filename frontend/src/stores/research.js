@@ -148,9 +148,9 @@ export const useResearchStore = defineStore("research", {
       if (!this.runId) return;
       const data = await api(`/research-runs/${encodeURIComponent(this.runId)}/follow-ups`);
       this.followUps = data.items;
-      if (!this.selectedFollowUpId && this.followUps.length) {
-        this.selectedFollowUpId = this.followUps.at(-1).id;
-      }
+      this.selectedFollowUpId = this.followUps.find(
+        (item) => item.is_minimized === false
+      )?.id || null;
       if (this.selectedFollowUp) this.connectFollowUpStream(this.selectedFollowUp);
     },
     async createFollowUp(anchor, question) {
@@ -159,6 +159,7 @@ export const useResearchStore = defineStore("research", {
         method: "POST",
         body: JSON.stringify({ anchor, question }),
       });
+      this.followUps.forEach((item) => { item.is_minimized = true; });
       this.upsertFollowUp(thread);
       this.selectedFollowUpId = thread.id;
       this.connectFollowUpStream(thread);
@@ -184,6 +185,28 @@ export const useResearchStore = defineStore("research", {
       this.connectFollowUpStream(thread);
       return thread;
     },
+    async expandFollowUp(threadId) {
+      if (!this.runId) return null;
+      const data = await api(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(threadId)}/state`,
+        { method: "POST", body: JSON.stringify({ minimized: false }) },
+      );
+      this.replaceFollowUps(data.items);
+      this.selectedFollowUpId = threadId;
+      if (this.selectedFollowUp) this.connectFollowUpStream(this.selectedFollowUp);
+      return this.selectedFollowUp;
+    },
+    async minimizeFollowUp() {
+      if (!this.runId || !this.selectedFollowUpId) return null;
+      const data = await api(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(this.selectedFollowUpId)}/state`,
+        { method: "POST", body: JSON.stringify({ minimized: true }) },
+      );
+      this.replaceFollowUps(data.items);
+      this.selectedFollowUpId = null;
+      this.closeFollowUpStream();
+      return data.items;
+    },
     selectFollowUp(threadId) {
       this.closeFollowUpStream();
       this.selectedFollowUpId = threadId;
@@ -193,6 +216,9 @@ export const useResearchStore = defineStore("research", {
       const index = this.followUps.findIndex((item) => item.id === thread.id);
       if (index < 0) this.followUps.push(thread);
       else this.followUps.splice(index, 1, thread);
+    },
+    replaceFollowUps(items) {
+      this.followUps.splice(0, this.followUps.length, ...items);
     },
     connectFollowUpStream(thread = this.selectedFollowUp) {
       this.closeFollowUpStream();

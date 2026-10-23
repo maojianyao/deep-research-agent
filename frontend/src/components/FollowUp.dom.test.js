@@ -64,8 +64,10 @@ function mountCompletedReport(followUp = null) {
   const store = useResearchStore();
   store.runId = "run_followup";
   store.run = completedRun();
-  store.followUps = followUp ? [followUp] : [];
-  store.selectedFollowUpId = followUp?.id || null;
+  store.followUps = Array.isArray(followUp) ? followUp : (followUp ? [followUp] : []);
+  store.selectedFollowUpId = Array.isArray(followUp)
+    ? followUp.find((item) => item.is_minimized === false)?.id || null
+    : followUp?.id || null;
   store.loadRuns = vi.fn();
   const wrapper = mount(App, {
     attachTo: document.body,
@@ -175,6 +177,147 @@ describe("report follow-up DOM", () => {
       start: renderedText.indexOf("After table."),
       end: renderedText.indexOf("After table.") + "After table.".length,
     });
+  });
+
+  test("report renders multiple highlights, markers, and restores an overlapping selection", async () => {
+    const rendered = "Example report Summary Summary text with key evidence (evidence_abc123).";
+    const firstId = "followup_first";
+    const secondId = "followup_second";
+    const threads = [
+      {
+        id: firstId, is_minimized: false,
+        anchor: {
+          text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+          report_digest: "a".repeat(64),
+        },
+        messages: [],
+      },
+      {
+        id: secondId, is_minimized: true,
+        anchor: {
+          text: "key evidence", start: rendered.indexOf("key evidence"),
+          end: rendered.indexOf("key evidence") + "key evidence".length,
+          prefix: "", suffix: "", report_digest: "a".repeat(64),
+        },
+        messages: [],
+      },
+    ];
+    const wrapper = mount(ReportView, {
+      attachTo: document.body,
+      props: {
+        markdown: completedRun().report.markdown,
+        active: false,
+        eligible: true,
+        followUps: threads,
+      },
+    });
+    await nextTick();
+
+    expect(wrapper.findAll("[data-follow-up-highlight]")).toHaveLength(2);
+    const markers = wrapper.findAll("[data-follow-up-marker]");
+    expect(markers).toHaveLength(1);
+    expect(markers[0].attributes("data-thread-id")).toBe(secondId);
+
+    selectNode(wrapper.find("h1").element);
+    await wrapper.trigger("mouseup");
+    expect(wrapper.emitted("restore-follow-up")?.at(-1)).toEqual([firstId]);
+    expect(wrapper.emitted("selection")?.at(-1)).toEqual([null]);
+  });
+
+  test("clicking a marker exchanges the expanded conversation and close creates markers", async () => {
+    const first = {
+      id: "followup_open",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        { id: 31, role: "user", sequence: 1, content: "第一会话问题", status: "completed" },
+        { id: 32, role: "assistant", sequence: 2, content: "第一会话回答", status: "completed" },
+      ],
+      stream_cursor: 3,
+    };
+    const second = {
+      id: "followup_marker",
+      run_id: "run_followup",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        { id: 39, role: "user", sequence: 1, content: "第二会话早期问题", status: "completed" },
+        { id: 40, role: "assistant", sequence: 2, content: "第二会话早期回答", status: "completed" },
+        { id: 41, role: "user", sequence: 3, content: "第二会话问题", status: "completed" },
+        { id: 42, role: "assistant", sequence: 4, content: "第二会话回答", status: "completed" },
+      ],
+      stream_cursor: 5,
+    };
+    let stateBody = { items: [{ ...first, is_minimized: true }, { ...second, is_minimized: false }] };
+    globalThis.fetch.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => stateBody,
+    }));
+    const { wrapper } = mountCompletedReport([first, second]);
+    await nextTick();
+
+    let panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.text()).toContain("第一会话回答");
+    const marker = wrapper.find(`[data-follow-up-marker][data-thread-id="${second.id}"]`);
+    expect(marker.exists()).toBe(true);
+    await marker.trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    panel = wrapper.find("[data-follow-up-panel]");
+    expect(panel.text()).toContain("第二会话早期回答");
+    expect(panel.text()).toContain("第二会话回答");
+    expect(wrapper.findAll("[data-follow-up-marker]")).toHaveLength(1);
+
+    stateBody = { items: [{ ...first, is_minimized: true }, { ...second, is_minimized: true }] };
+    await panel.find('button[aria-label="关闭追问"]').trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(false);
+    expect(wrapper.findAll("[data-follow-up-marker]")).toHaveLength(2);
+  });
+
+  test("clearing a report selection keeps the expanded generating stream connected", async () => {
+    const thread = {
+      id: "followup_generating",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        {
+          id: 51, role: "user", sequence: 1, content: "请解释。",
+          status: "completed", error_code: null, error_message: null,
+        },
+        {
+          id: 52, role: "assistant", sequence: 2, content: "正在回答",
+          status: "generating", error_code: null, error_message: null,
+        },
+      ],
+      stream_cursor: 2,
+    };
+    const { wrapper, store } = mountCompletedReport(thread);
+    await nextTick();
+    store.connectFollowUpStream(thread);
+    const source = FakeEventSource.instances[0];
+
+    window.getSelection()?.removeAllRanges();
+    await wrapper.find("[data-report-body]").trigger("mouseup");
+    await nextTick();
+
+    expect(source.closed).toBe(false);
+    expect(store.selectedFollowUpId).toBe(thread.id);
   });
 
   test("submitting a first question renders the persisted assistant answer", async () => {
@@ -505,6 +648,7 @@ describe("report follow-up DOM", () => {
         },
       ],
       stream_cursor: 2,
+      is_minimized: false,
       created_at: "2026-10-22T10:01:00",
       updated_at: "2026-10-22T10:01:01",
     };

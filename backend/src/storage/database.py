@@ -26,10 +26,19 @@ def create_db_engine(url: str | None = None) -> Engine:
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
     columns = {column["name"] for column in inspect(engine).get_columns("research_runs")}
+    tables = set(inspect(engine).get_table_names())
+    follow_up_columns = (
+        {column["name"] for column in inspect(engine).get_columns("follow_up_threads")}
+        if "follow_up_threads" in tables else set()
+    )
     with engine.begin() as connection:
         if "resume_status" not in columns:
             connection.execute(text("ALTER TABLE research_runs ADD COLUMN resume_status VARCHAR(32)"))
         if "resume_iteration" not in columns:
             connection.execute(text(
                 "ALTER TABLE research_runs ADD COLUMN resume_iteration INTEGER NOT NULL DEFAULT 0"
+            ))
+        if follow_up_columns and "is_minimized" not in follow_up_columns:
+            connection.execute(text(
+                "ALTER TABLE follow_up_threads ADD COLUMN is_minimized BOOLEAN NOT NULL DEFAULT 1"
             ))

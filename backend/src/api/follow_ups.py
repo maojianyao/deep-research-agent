@@ -15,11 +15,12 @@ from backend.src.services.follow_up import (
 )
 from backend.src.storage import (
     FollowUpBusyError, FollowUpNotFoundError, FollowUpNotRetryableError,
+    FollowUpOverlapError,
 )
 
 from .follow_up_schemas import (
     AppendFollowUpQuestion, CreateFollowUpThread, FollowUpThreadList,
-    FollowUpThreadView,
+    FollowUpThreadView, UpdateFollowUpState,
 )
 
 
@@ -65,12 +66,20 @@ async def create_follow_up(run_id: str, payload: CreateFollowUpThread, request: 
     if not question:
         raise HTTPException(status_code=422, detail="Question cannot be blank")
 
-    started = await asyncio.to_thread(
-        request.app.state.follow_up_repository.start_thread,
-        run_id=run_id,
-        anchor=payload.anchor.model_dump(),
-        question=question,
-    )
+    lock = request.app.state.follow_up_locks.setdefault(f"run:{run_id}", asyncio.Lock())
+    async with lock:
+        try:
+            started = await asyncio.to_thread(
+                request.app.state.follow_up_repository.start_thread,
+                run_id=run_id,
+                anchor=payload.anchor.model_dump(),
+                question=question,
+            )
+        except FollowUpOverlapError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Selection overlaps an existing follow-up conversation",
+            ) from exc
     _start_generation(request, started)
     return started.thread
 
@@ -133,6 +142,19 @@ async def retry_follow_up_message(
             raise HTTPException(status_code=404, detail="Follow-up message not found") from exc
         _start_generation(request, started)
         return started.thread
+
+
+@router.post("/{thread_id}/state", response_model=FollowUpThreadList)
+def update_follow_up_state(
+    run_id: str, thread_id: str, payload: UpdateFollowUpState, request: Request,
+):
+    _eligible_run(request.app.state.repository, run_id)
+    items = request.app.state.follow_up_repository.set_minimized(
+        run_id, thread_id, payload.minimized
+    )
+    if items is None:
+        raise HTTPException(status_code=404, detail="Follow-up thread not found")
+    return {"items": items}
 
 
 @router.get("/{thread_id}/events")

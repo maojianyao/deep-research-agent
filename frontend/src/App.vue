@@ -62,7 +62,7 @@
               <div class="grid min-w-0 gap-4">
                 <section class="rounded-md border border-slate-200 bg-white">
                   <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3"><h2 class="text-xs font-semibold">研究报告</h2><span class="text-[10px] text-slate-400">引用编号可点击查看来源</span></div>
-                  <div class="p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" /></div>
+                  <div class="p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" :follow-ups="store.followUps" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" @restore-follow-up="restoreFollowUp" /></div>
                 </section>
 
                 <details class="overflow-hidden rounded-md border border-slate-200 bg-white">
@@ -245,11 +245,30 @@ async function showCitation(referenceId) {
 }
 
 function openFollowUpSelection(selection) {
-  store.closeFollowUpStream();
   pendingFollowUp.value = selection;
   followUpOpen.value = false;
   followUpError.value = "";
-  if (selection) store.selectedFollowUpId = null;
+  if (selection) {
+    store.closeFollowUpStream();
+    store.selectedFollowUpId = null;
+    return;
+  }
+  const expanded = store.followUps.find((item) => item.is_minimized === false);
+  if (store.selectedFollowUpId === (expanded?.id || null)) return;
+  store.closeFollowUpStream();
+  store.selectedFollowUpId = expanded?.id || null;
+  if (store.selectedFollowUp) store.connectFollowUpStream(store.selectedFollowUp);
+}
+
+async function restoreFollowUp(threadId) {
+  pendingFollowUp.value = null;
+  followUpOpen.value = false;
+  followUpError.value = "";
+  try {
+    await store.expandFollowUp(threadId);
+  } catch (error) {
+    notify(error.message, true);
+  }
 }
 
 function openFollowUpPanel() {
@@ -295,11 +314,20 @@ async function retryFollowUp(messageId) {
   }
 }
 
-function closeFollowUp() {
-  store.closeFollowUpStream();
+async function closeFollowUp() {
+  const hadPersistedThread = Boolean(store.selectedFollowUp);
+  if (hadPersistedThread) {
+    try {
+      await store.minimizeFollowUp();
+    } catch (error) {
+      notify(error.message, true);
+      return;
+    }
+  } else {
+    store.closeFollowUpStream();
+  }
   pendingFollowUp.value = null;
   followUpOpen.value = false;
-  store.selectedFollowUpId = null;
   followUpError.value = "";
 }
 

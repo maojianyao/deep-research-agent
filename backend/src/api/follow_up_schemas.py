@@ -24,6 +24,10 @@ class AppendFollowUpQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
 
 
+class UpdateFollowUpState(BaseModel):
+    minimized: bool
+
+
 class FollowUpMessageView(BaseModel):
     id: int
     role: Literal["user", "assistant"]
@@ -41,6 +45,7 @@ class FollowUpThreadView(BaseModel):
     anchor: ReportSelectionAnchor
     messages: list[FollowUpMessageView]
     stream_cursor: int
+    is_minimized: bool
     created_at: datetime
     updated_at: datetime
 

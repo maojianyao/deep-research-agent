@@ -288,6 +288,7 @@ class FollowUpThreadModel(Base):
     selection_prefix: Mapped[str] = mapped_column(Text, nullable=False, default="")
     selection_suffix: Mapped[str] = mapped_column(Text, nullable=False, default="")
     report_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_minimized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

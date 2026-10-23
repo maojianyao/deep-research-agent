@@ -1,23 +1,66 @@
 <template>
-  <div ref="reportBody" data-report-body class="markdown-content" @click="handleCitation" @mouseup="captureSelection">
-    <div v-if="html" v-html="html"></div>
-    <p v-else class="text-sm text-slate-500">{{ active ? "研究报告生成后会显示在这里。" : "当前研究没有生成报告。" }}</p>
+  <div
+    ref="reportBody"
+    data-report-body
+    class="relative"
+    @click="handleCitation"
+    @mouseup="captureSelection"
+  >
+    <div ref="reportContent" class="markdown-content">
+      <div v-if="html" v-html="html"></div>
+      <p v-else class="text-sm text-slate-500">{{ active ? "研究报告生成后会显示在这里。" : "当前研究没有生成报告。" }}</p>
+    </div>
+
+    <div data-follow-up-overlay class="pointer-events-none absolute inset-0 z-10">
+      <span
+        v-for="(highlight, index) in highlights"
+        :key="`${highlight.threadId}-${index}`"
+        data-follow-up-highlight
+        :data-thread-id="highlight.threadId"
+        class="absolute rounded-sm"
+        :class="highlight.minimized ? 'bg-emerald-300/25' : 'bg-amber-300/35'"
+        :style="highlight.style"
+        aria-hidden="true"
+      ></span>
+      <button
+        v-for="marker in markers"
+        :key="marker.threadId"
+        type="button"
+        data-follow-up-marker
+        :data-thread-id="marker.threadId"
+        class="pointer-events-auto absolute grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-emerald-600 text-[9px] font-bold text-white shadow-sm hover:bg-emerald-700"
+        :style="marker.style"
+        title="恢复追问"
+        aria-label="恢复追问"
+        @mousedown.prevent.stop
+        @click.stop="$emit('restore-follow-up', marker.threadId)"
+      >追</button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { safeMarkdown } from "../lib/markdown";
 
 const props = defineProps({
   markdown: { type: String, default: "" },
   active: Boolean,
   eligible: Boolean,
+  followUps: { type: Array, default: () => [] },
 });
-const emit = defineEmits(["citation", "selection", "selection-error"]);
+const emit = defineEmits(["citation", "selection", "selection-error", "restore-follow-up"]);
 const reportBody = ref(null);
+const reportContent = ref(null);
+const highlights = ref([]);
+const markers = ref([]);
 
 const html = computed(() => safeMarkdown(props.markdown));
+const overlayState = computed(() => props.followUps.map((thread) => ({
+  id: thread.id,
+  anchor: thread.anchor,
+  isMinimized: thread.is_minimized,
+})));
 
 function handleCitation(event) {
   const target = event.target.closest(".citation-id");
@@ -76,6 +119,12 @@ function clearSelection() {
   emit("selection", null);
 }
 
+function overlappingThreads(start, end) {
+  return props.followUps.filter((thread) => (
+    thread.anchor.start < end && thread.anchor.end > start
+  ));
+}
+
 function captureSelection() {
   if (!props.eligible || !props.markdown) {
     clearSelection();
@@ -87,7 +136,7 @@ function captureSelection() {
     return;
   }
   const range = selection.getRangeAt(0);
-  const root = reportBody.value;
+  const root = reportContent.value;
   const startElement = endpointElement(range.startContainer);
   const endElement = endpointElement(range.endContainer);
   if (!root?.contains(range.commonAncestorContainer)
@@ -111,6 +160,21 @@ function captureSelection() {
   const before = rangePart(root, range.startContainer, range.startOffset, true);
   const after = rangePart(root, range.endContainer, range.endOffset, false);
   const start = Array.from(before).length;
+  const end = start + Array.from(text).length;
+  const overlaps = overlappingThreads(start, end);
+  if (overlaps.length === 1) {
+    selection.removeAllRanges();
+    emit("selection", null);
+    emit("restore-follow-up", overlaps[0].id);
+    return;
+  }
+  if (overlaps.length > 1) {
+    selection.removeAllRanges();
+    emit("selection-error", "选区跨过多个追问，请缩短后选择其中一个。");
+    clearSelection();
+    return;
+  }
+
   const rect = typeof range.getBoundingClientRect === "function"
     ? range.getBoundingClientRect()
     : { right: 0, bottom: 0 };
@@ -118,7 +182,7 @@ function captureSelection() {
     anchor: {
       text,
       start,
-      end: start + Array.from(text).length,
+      end,
       prefix: Array.from(normalizeSpace(before)).slice(-80).join(""),
       suffix: Array.from(after).slice(0, 80).join(""),
       report_digest: "",
@@ -130,4 +194,111 @@ function captureSelection() {
   });
 }
 
+function textNodes(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  let node = walker.nextNode();
+  while (node) {
+    if (node.nodeValue) nodes.push(node);
+    node = walker.nextNode();
+  }
+  return nodes;
+}
+
+function prefixLength(root, node, offset) {
+  return Array.from(rangePart(root, node, offset, true)).length;
+}
+
+function boundaryAt(root, nodes, target) {
+  if (!nodes.length) return null;
+  if (target <= 0) return { node: nodes[0], offset: 0 };
+  for (const node of nodes) {
+    const end = prefixLength(root, node, node.nodeValue.length);
+    if (target > end) continue;
+    const chars = Array.from(node.nodeValue);
+    let low = 0;
+    let high = chars.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const offset = chars.slice(0, middle).join("").length;
+      if (prefixLength(root, node, offset) >= target) high = middle;
+      else low = middle + 1;
+    }
+    const offset = chars.slice(0, low).join("").length;
+    return { node, offset };
+  }
+  const last = nodes.at(-1);
+  return { node: last, offset: last.nodeValue.length };
+}
+
+function rangeForAnchor(root, nodes, anchor) {
+  const start = boundaryAt(root, nodes, anchor.start);
+  const end = boundaryAt(root, nodes, anchor.end);
+  if (!start || !end) return null;
+  const range = document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  return range;
+}
+
+function rebuildOverlays() {
+  const root = reportBody.value;
+  const content = reportContent.value;
+  if (!root || !content || !props.followUps.length) {
+    highlights.value = [];
+    markers.value = [];
+    return;
+  }
+  const base = root.getBoundingClientRect();
+  const nodes = textNodes(content);
+  const nextHighlights = [];
+  const nextMarkers = [];
+  props.followUps.forEach((thread, threadIndex) => {
+    const range = rangeForAnchor(content, nodes, thread.anchor);
+    if (!range) return;
+    const rawRects = typeof range.getClientRects === "function"
+      ? Array.from(range.getClientRects())
+      : [];
+    const rects = rawRects.filter((rect) => rect.width > 0 && rect.height > 0);
+    const fallback = { left: 0, top: threadIndex * 28, width: 120, height: 16, right: 120 };
+    const positioned = (rects.length ? rects : [fallback]).map((rect) => ({
+      left: `${rect.left - base.left}px`,
+      top: `${rect.top - base.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+    }));
+    positioned.forEach((style) => nextHighlights.push({
+      threadId: thread.id,
+      minimized: thread.is_minimized,
+      style,
+    }));
+    if (thread.is_minimized) {
+      const first = rects[0] || fallback;
+      nextMarkers.push({
+        threadId: thread.id,
+        style: {
+          left: `${first.right - base.left + 3}px`,
+          top: `${first.top - base.top - 2}px`,
+        },
+      });
+    }
+  });
+  highlights.value = nextHighlights;
+  markers.value = nextMarkers;
+}
+
+function scheduleOverlays() {
+  nextTick(rebuildOverlays);
+}
+
+watch(
+  [overlayState, html],
+  rebuildOverlays,
+  { deep: true, immediate: true, flush: "post" },
+);
+onMounted(() => {
+  window.addEventListener("resize", scheduleOverlays);
+  rebuildOverlays();
+});
+onUnmounted(() => window.removeEventListener("resize", scheduleOverlays));
 </script>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from backend.src.research.schemas import new_id
@@ -24,6 +24,10 @@ class FollowUpNotRetryableError(Exception):
     pass
 
 
+class FollowUpOverlapError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class StartedFollowUp:
     thread: dict
@@ -39,6 +43,19 @@ class FollowUpRepository:
                      question: str) -> StartedFollowUp:
         thread_id = new_id("followup")
         with Session(self.engine) as session, session.begin():
+            overlaps = session.scalar(select(func.count()).select_from(FollowUpThreadModel).where(
+                FollowUpThreadModel.run_id == run_id,
+                FollowUpThreadModel.report_digest == anchor["report_digest"],
+                FollowUpThreadModel.selection_start < anchor["end"],
+                FollowUpThreadModel.selection_end > anchor["start"],
+            ))
+            if overlaps:
+                raise FollowUpOverlapError
+            session.execute(
+                update(FollowUpThreadModel)
+                .where(FollowUpThreadModel.run_id == run_id)
+                .values(is_minimized=True)
+            )
             thread = FollowUpThreadModel(
                 id=thread_id,
                 run_id=run_id,
@@ -48,6 +65,7 @@ class FollowUpRepository:
                 selection_prefix=anchor["prefix"],
                 selection_suffix=anchor["suffix"],
                 report_digest=anchor["report_digest"],
+                is_minimized=False,
             )
             user = FollowUpMessageModel(
                 role="user", sequence=1, content=question, status="completed",
@@ -212,6 +230,34 @@ class FollowUpRepository:
                 for model in session.scalars(query).all()
             ]
 
+    def set_minimized(self, run_id: str, thread_id: str,
+                      minimized: bool) -> list[dict] | None:
+        with Session(self.engine) as session, session.begin():
+            thread = session.scalar(select(FollowUpThreadModel).where(
+                FollowUpThreadModel.run_id == run_id,
+                FollowUpThreadModel.id == thread_id,
+            ))
+            if thread is None:
+                return None
+            if not minimized:
+                session.execute(
+                    update(FollowUpThreadModel)
+                    .where(FollowUpThreadModel.run_id == run_id)
+                    .values(is_minimized=True)
+                )
+            thread.is_minimized = minimized
+            session.flush()
+            query = (
+                select(FollowUpThreadModel)
+                .where(FollowUpThreadModel.run_id == run_id)
+                .options(selectinload(FollowUpThreadModel.messages))
+                .order_by(FollowUpThreadModel.created_at, FollowUpThreadModel.id)
+            )
+            return [
+                self._to_dict(item, self._thread_cursor(session, item.id))
+                for item in session.scalars(query).all()
+            ]
+
     def append_delta(self, thread_id: str, message_id: int, content: str) -> int:
         with Session(self.engine) as session, session.begin():
             message = session.get(FollowUpMessageModel, message_id)
@@ -374,6 +420,7 @@ class FollowUpRepository:
                 "created_at": item.created_at,
             } for item in model.messages],
             "stream_cursor": stream_cursor,
+            "is_minimized": model.is_minimized,
             "created_at": model.created_at,
             "updated_at": model.updated_at,
         }

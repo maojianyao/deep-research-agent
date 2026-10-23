@@ -299,7 +299,7 @@ class FollowUpStreamingApiTests(unittest.TestCase):
 
         with TestClient(self.app) as client:
             first = self._start_thread(client, run.id)
-            second = self._start_thread(client, run.id)
+            second = self._start_thread(client, run.id, text="Example", start=0)
             answerer = self.answerers[0]
             self._wait_for_calls(answerer, 2)
             self._wait_for_thread_assistant(
@@ -585,12 +585,12 @@ class FollowUpStreamingApiTests(unittest.TestCase):
             time.sleep(0.02)
         self.fail(f"assistant did not reach {status!r} with content {content!r}")
 
-    def _start_thread(self, client, run_id):
+    def _start_thread(self, client, run_id, text="Summary", start=23):
         detail = client.get(f"/api/research-runs/{run_id}").json()
         anchor = {
-            "text": "Summary",
-            "start": 23,
-            "end": 30,
+            "text": text,
+            "start": start,
+            "end": start + len(text),
             "prefix": "",
             "suffix": " text",
             "report_digest": detail["report"]["anchor_digest"],
