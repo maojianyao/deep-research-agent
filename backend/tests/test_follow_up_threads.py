@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, inspect
 
 from backend.main import create_app
 from backend.src.research.schemas import ReportBlock
+from backend.src.services.follow_up import normalize_report_text
 from backend.src.storage import create_db_engine, init_db
 from backend.tests.test_storage import make_persisted_run
 
@@ -116,6 +117,53 @@ class FollowUpThreadsApiTests(unittest.TestCase):
         }
         self.assertIn("is_minimized", columns)
         legacy.dispose()
+
+    def test_cross_markdown_anchor_round_trips_through_http_and_recreation(self):
+        run = make_persisted_run("_markdown_anchor")
+        run.report.blocks = [ReportBlock(
+            heading="Heading",
+            text=(
+                "Paragraph text\n\n"
+                "- outer\n"
+                "  - nested\n\n"
+                "| A | B |\n"
+                "| --- | --- |\n"
+                "| 1 | 2 |\n\n"
+                "```text\n"
+                "code line\n"
+                "```\n\n"
+                "Tail"
+            ),
+        )]
+        self.app.state.repository.save_run(run)
+        rendered = normalize_report_text(run.to_markdown())
+
+        with TestClient(self.app) as client:
+            detail = client.get(f"/api/research-runs/{run.id}").json()
+            selection = "Heading Paragraph text outer nested A B 1 2 code line Tail"
+            first = self._create(
+                client,
+                run.id,
+                detail,
+                selection,
+                rendered.index(selection),
+            )
+            self.assertEqual(first["anchor"]["text"], selection)
+            self.assertEqual(
+                first["anchor"]["end"] - first["anchor"]["start"],
+                len(selection),
+            )
+
+        recreated = create_app(
+            create_db_engine(self.database_url),
+            orchestrator_factory=lambda repository: None,
+            follow_up_answerer_factory=ImmediateAnswerer,
+        )
+        with TestClient(recreated) as client:
+            restored = client.get(
+                f"/api/research-runs/{run.id}/follow-ups/{first['id']}"
+            ).json()
+        self.assertEqual(restored["anchor"], first["anchor"])
 
     def _create(self, client, run_id, detail, text, start):
         response = self._post(client, run_id, detail, text, start, expected=201)

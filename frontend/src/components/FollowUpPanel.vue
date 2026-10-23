@@ -1,8 +1,14 @@
 <template>
   <aside
     data-follow-up-panel
-    class="fixed inset-x-3 bottom-3 z-40 max-h-[74vh] overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-20 sm:h-[min(620px,calc(100vh-6rem))] sm:w-[360px]"
+    class="fixed z-40 overflow-hidden border border-slate-200 bg-white shadow-2xl"
+    :class="narrow
+      ? 'inset-x-0 bottom-0 h-[min(78vh,620px)] w-full rounded-t-xl border-b-0'
+      : 'bottom-auto right-4 top-20 h-[min(620px,calc(100vh-6rem))] w-[360px] rounded-md'"
+    :data-layout="narrow ? 'sheet' : 'floating'"
     aria-label="追问会话"
+    role="dialog"
+    aria-modal="false"
   >
     <header class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
       <div>
@@ -17,7 +23,7 @@
           class="rounded px-2 py-1 text-[10px] text-rose-700 hover:bg-rose-50"
           @click="$emit('delete')"
         >删除</button>
-        <button type="button" class="rounded px-2 py-1 text-lg text-slate-400 hover:bg-slate-100" aria-label="关闭追问" @click="$emit('close')">×</button>
+        <button type="button" class="rounded px-2 py-1 text-lg text-slate-400 hover:bg-slate-100" aria-label="最小化追问" title="最小化追问" @click="$emit('close')">—</button>
       </div>
     </header>
 
@@ -71,20 +77,23 @@
           @keydown.enter.exact.prevent="submit"
         ></textarea>
         <div class="mt-2 flex items-center justify-between">
-          <span class="text-[9px] text-slate-400">{{ question.length }} / 2000</span>
+          <span class="text-[9px]" :class="tooLong ? 'font-semibold text-rose-700' : 'text-slate-400'">{{ questionLength }} / 2000</span>
           <button
             type="submit"
             class="rounded bg-teal-800 px-3 py-1.5 text-[10px] font-semibold text-white disabled:opacity-40"
-            :disabled="busy || !question.trim()"
+            :disabled="busy || !question.trim() || tooLong"
           >发送</button>
         </div>
+        <p v-if="tooLong" data-input-too-long class="mt-1 text-[9px] text-rose-700" role="alert">
+          问题超过 2,000 个字符，无法发送，请缩短。
+        </p>
       </form>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { safeMarkdown } from "../lib/markdown";
 
 const props = defineProps({
@@ -93,10 +102,13 @@ const props = defineProps({
   busy: Boolean,
   error: { type: String, default: "" },
   canDelete: Boolean,
+  narrow: Boolean,
 });
 const emit = defineEmits(["submit", "retry", "delete", "close"]);
 const input = ref(null);
 const question = ref("");
+const questionLength = computed(() => Array.from(question.value).length);
+const tooLong = computed(() => questionLength.value > 2000);
 
 function focusInput() {
   nextTick(() => input.value?.focus());
@@ -104,7 +116,7 @@ function focusInput() {
 
 function submit() {
   const value = question.value.trim();
-  if (!value || props.busy) return;
+  if (!value || props.busy || tooLong.value) return;
   emit("submit", value);
 }
 

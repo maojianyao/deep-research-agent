@@ -85,9 +85,16 @@ function selectNode(node) {
   return selection;
 }
 
+function setViewport(width, height = 800) {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  window.dispatchEvent(new Event("resize"));
+}
+
 afterEach(() => {
   window.getSelection()?.removeAllRanges();
   document.body.innerHTML = "";
+  setViewport(1024, 800);
   vi.restoreAllMocks();
 });
 
@@ -96,6 +103,8 @@ describe("report follow-up DOM", () => {
     globalThis.fetch = vi.fn();
     globalThis.EventSource = FakeEventSource;
     FakeEventSource.instances = [];
+    HTMLDialogElement.prototype.showModal = vi.fn();
+    HTMLDialogElement.prototype.close = vi.fn();
   });
 
   test("selecting completed report prose reveals 提问 and opens a focused side panel", async () => {
@@ -129,6 +138,16 @@ describe("report follow-up DOM", () => {
     const { wrapper } = mountCompletedReport();
     const citation = wrapper.find(".citation-id");
     expect(citation.exists()).toBe(true);
+    await citation.trigger("click");
+    expect(wrapper.findComponent(ReportView).emitted("citation")?.at(-1)).toEqual([
+      "evidence_abc123",
+    ]);
+    const createButton = wrapper.findAll("button").find(
+      (button) => button.text().includes("新建研究")
+    );
+    await createButton.trigger("click");
+    expect(HTMLDialogElement.prototype.showModal).toHaveBeenCalled();
+    expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(false);
 
     selectNode(citation.element);
     await citation.trigger("mouseup");
@@ -139,6 +158,186 @@ describe("report follow-up DOM", () => {
     await wrapper.find("main").trigger("mouseup");
     await nextTick();
     expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(false);
+  });
+
+  test("question control stays within a narrow viewport near selection edges", async () => {
+    setViewport(360, 320);
+    const { wrapper } = mountCompletedReport();
+    const body = wrapper.find("[data-report-body]");
+    selectNode(body.element.querySelector("p"));
+    await body.trigger("mouseup");
+    await nextTick();
+
+    const trigger = wrapper.find("[data-follow-up-trigger]");
+    expect(trigger.exists()).toBe(true);
+    const left = Number(/left:\s*([\d.]+)px/.exec(trigger.attributes("style"))[1]);
+    const top = Number(/top:\s*([\d.]+)px/.exec(trigger.attributes("style"))[1]);
+    expect(left).toBeGreaterThanOrEqual(8);
+    expect(top).toBeGreaterThanOrEqual(8);
+    expect(left).toBeLessThanOrEqual(360 - 64);
+    expect(top).toBeLessThanOrEqual(320 - 44);
+  });
+
+  test("desktop and narrow conversations expose semantic floating and bottom-sheet layouts", async () => {
+    const thread = {
+      id: "followup_layout",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [],
+      stream_cursor: 0,
+    };
+    setViewport(1200);
+    const desktop = mountCompletedReport(thread);
+    await nextTick();
+    let panel = desktop.wrapper.find("[data-follow-up-panel]");
+    expect(panel.attributes("data-layout")).toBe("floating");
+    expect(panel.find('[aria-label="最小化追问"]').exists()).toBe(true);
+    expect(panel.find("[data-delete-follow-up]").exists()).toBe(true);
+    desktop.wrapper.unmount();
+
+    setViewport(420, 720);
+    const markerThread = {
+      ...thread,
+      id: "followup_layout_marker",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+    };
+    const narrow = mountCompletedReport([thread, markerThread]);
+    await nextTick();
+    panel = narrow.wrapper.find("[data-follow-up-panel]");
+    expect(panel.attributes("data-layout")).toBe("sheet");
+    expect(panel.classes()).toContain("w-full");
+    expect(panel.classes()).toContain("bottom-0");
+    expect(panel.find('[aria-label="最小化追问"]').exists()).toBe(true);
+    expect(panel.find("[data-delete-follow-up]").exists()).toBe(true);
+    const marker = narrow.wrapper.find(
+      '[data-follow-up-marker][data-thread-id="followup_layout_marker"]'
+    );
+    expect(marker.exists()).toBe(true);
+    const left = Number(/left:\s*([\d.]+)px/.exec(marker.attributes("style"))[1]);
+    const top = Number(/top:\s*([\d.]+)px/.exec(marker.attributes("style"))[1]);
+    expect(left).toBeGreaterThanOrEqual(2);
+    expect(top).toBeGreaterThanOrEqual(2);
+    expect(left).toBeLessThanOrEqual(420 - 22);
+  });
+
+  test("contiguous selection across markdown block types emits a reloadable anchor", async () => {
+    const markdown = [
+      "# Heading",
+      "",
+      "Paragraph text",
+      "",
+      "- outer",
+      "  - nested",
+      "",
+      "| A | B |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "",
+      "```text",
+      "code line",
+      "```",
+      "",
+      "Tail",
+    ].join("\n");
+    const wrapper = mount(ReportView, {
+      attachTo: document.body,
+      props: { markdown, active: false, eligible: true, followUps: [] },
+    });
+    const heading = wrapper.find("h1").element.firstChild;
+    const tail = wrapper.findAll("p").at(-1).element.firstChild;
+    const range = document.createRange();
+    range.setStart(heading, 0);
+    range.setEnd(tail, tail.nodeValue.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await wrapper.trigger("mouseup");
+    const anchor = wrapper.emitted("selection").at(-1)[0].anchor;
+    expect(anchor.text).toContain("Heading Paragraph text outer nested A B 1 2 code line Tail");
+
+    wrapper.unmount();
+    const restored = mount(ReportView, {
+      attachTo: document.body,
+      props: {
+        markdown,
+        active: false,
+        eligible: true,
+        followUps: [{
+          id: "followup_markdown",
+          is_minimized: false,
+          anchor,
+          messages: [],
+        }],
+      },
+    });
+    await nextTick();
+    expect(
+      restored.find('[data-follow-up-highlight][data-thread-id="followup_markdown"]').exists()
+    ).toBe(true);
+  });
+
+  test("overlong and multi-conversation selections reject with shrink-range guidance", async () => {
+    const longMarkdown = `# Heading\n\n${"长".repeat(8001)}`;
+    const longView = mount(ReportView, {
+      attachTo: document.body,
+      props: { markdown: longMarkdown, active: false, eligible: true, followUps: [] },
+    });
+    selectNode(longView.find("p").element);
+    await longView.trigger("mouseup");
+    expect(longView.emitted("selection-error")?.at(-1)[0]).toContain("缩小范围");
+    longView.unmount();
+
+    const markdown = "# Heading\n\nParagraph";
+    const multi = mount(ReportView, {
+      attachTo: document.body,
+      props: {
+        markdown,
+        active: false,
+        eligible: true,
+        followUps: [
+          {
+            id: "left", is_minimized: false,
+            anchor: { text: "Heading", start: 0, end: 7, report_digest: "a".repeat(64) },
+          },
+          {
+            id: "right", is_minimized: true,
+            anchor: {
+              text: "Paragraph", start: 8, end: 17,
+              report_digest: "a".repeat(64),
+            },
+          },
+        ],
+      },
+    });
+    selectNode(multi.find(".markdown-content").element);
+    await multi.trigger("mouseup");
+    expect(multi.emitted("selection-error")?.at(-1)[0]).toContain("缩小范围");
+    expect(multi.emitted("selection")?.at(-1)).toEqual([null]);
+    expect(multi.emitted("restore-follow-up")).toBeUndefined();
+  });
+
+  test("question input over 2000 characters is visibly blocked", async () => {
+    const { wrapper } = mountCompletedReport();
+    const body = wrapper.find("[data-report-body]");
+    selectNode(body.element.querySelector("p"));
+    await body.trigger("mouseup");
+    await wrapper.find("[data-follow-up-trigger]").trigger("click");
+    const panel = wrapper.find("[data-follow-up-panel]");
+    await panel.find("[data-follow-up-input]").setValue("问".repeat(2001));
+
+    expect(panel.find("[data-input-too-long]").exists()).toBe(true);
+    expect(panel.find("[data-input-too-long]").text()).toContain("2,000");
+    expect(panel.find('button[type="submit"]').attributes("disabled")).toBeDefined();
+    await panel.find("form").trigger("submit");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   test("selection anchors use canonical offsets across rendered table blocks", async () => {
@@ -278,7 +477,7 @@ describe("report follow-up DOM", () => {
     expect(wrapper.findAll("[data-follow-up-marker]")).toHaveLength(1);
 
     stateBody = { items: [{ ...first, is_minimized: true }, { ...second, is_minimized: true }] };
-    await panel.find('button[aria-label="关闭追问"]').trigger("click");
+    await panel.find('button[aria-label="最小化追问"]').trigger("click");
     await flushPromises();
     await nextTick();
 

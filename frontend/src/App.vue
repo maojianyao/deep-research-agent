@@ -110,7 +110,7 @@
       data-follow-up-trigger
       type="button"
       class="fixed z-30 rounded bg-amber-600 px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-lg hover:bg-amber-700"
-      :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y + 8, windowHeight - 44))}px` }"
+      :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y - 36, windowHeight - 44))}px` }"
       @mousedown.prevent
       @click="openFollowUpPanel"
     >提问</button>
@@ -121,6 +121,7 @@
       :busy="followUpBusy"
       :error="followUpError"
       :can-delete="Boolean(store.selectedFollowUp)"
+      :narrow="narrowViewport"
       @submit="submitFollowUp"
       @retry="retryFollowUp"
       @delete="deleteFollowUp"
@@ -165,6 +166,7 @@ const reviewCount = computed(() => store.runs.filter((item) => item.status === "
 const completedTasks = computed(() => store.run?.plan?.tasks?.filter((task) => task.completed).length || 0);
 const runError = computed(() => store.run?.error || "");
 const followUpBusy = computed(() => followUpSubmitting.value || store.selectedFollowUpBusy);
+const narrowViewport = computed(() => windowWidth.value < 640);
 const progress = computed(() => {
   const run = store.run;
   if (!run) return 0;

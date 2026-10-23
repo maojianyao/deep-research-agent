@@ -152,7 +152,7 @@ function captureSelection() {
     return;
   }
   if (Array.from(text).length > 8000) {
-    emit("selection-error", "选区超过 8,000 个字符，请缩短后重试。");
+    emit("selection-error", "选区过长，请缩小范围（最多 8,000 个字符）。");
     clearSelection();
     return;
   }
@@ -170,7 +170,7 @@ function captureSelection() {
   }
   if (overlaps.length > 1) {
     selection.removeAllRanges();
-    emit("selection-error", "选区跨过多个追问，请缩短后选择其中一个。");
+    emit("selection-error", "选区跨过多个追问，请缩小范围并只选择一个会话。");
     clearSelection();
     return;
   }
@@ -189,7 +189,7 @@ function captureSelection() {
     },
     position: {
       x: rect.right || Math.min(window.innerWidth - 96, 640),
-      y: rect.bottom || 180,
+      y: rect.top || Math.min(window.innerHeight - 96, 180),
     },
   });
 }
@@ -274,11 +274,22 @@ function rebuildOverlays() {
     }));
     if (thread.is_minimized) {
       const first = rects[0] || fallback;
+      const left = Math.max(
+        2,
+        Math.min(first.right - base.left + 3, (base.width || window.innerWidth) - 22),
+      );
+      const top = Math.max(
+        2,
+        Math.min(
+          first.top - base.top - 2,
+          (base.height || window.innerHeight) - 22,
+        ),
+      );
       nextMarkers.push({
         threadId: thread.id,
         style: {
-          left: `${first.right - base.left + 3}px`,
-          top: `${first.top - base.top - 2}px`,
+          left: `${left}px`,
+          top: `${top}px`,
         },
       });
     }
