@@ -120,8 +120,10 @@
       :messages="store.selectedFollowUp?.messages || []"
       :busy="followUpBusy"
       :error="followUpError"
+      :can-delete="Boolean(store.selectedFollowUp)"
       @submit="submitFollowUp"
       @retry="retryFollowUp"
+      @delete="deleteFollowUp"
       @close="closeFollowUp"
     />
     <div v-if="toastMessage" class="fixed bottom-5 right-5 z-50 max-w-sm rounded border border-slate-200 bg-white px-4 py-3 text-xs shadow-xl" :class="toastError ? 'text-rose-700' : 'text-slate-700'" role="status">{{ toastMessage }}</div>
@@ -225,7 +227,7 @@ async function continueRun(run) {
   } catch (error) { notify(error.message, true); }
 }
 async function deleteRun(run) {
-  if (!window.confirm(`确定删除研究主题“${run.user_request}”吗？计划、证据、结论、审稿记录和报告都会一并删除，此操作不可撤销。`)) return;
+  if (!window.confirm(`确定删除研究主题“${run.user_request}”吗？计划、证据、结论、审稿记录、报告及其全部追问会话都会一并删除，此操作不可撤销。`)) return;
   try {
     await store.deleteRun(run.id);
     notify("研究记录及关联数据已删除");
@@ -311,6 +313,21 @@ async function retryFollowUp(messageId) {
     followUpError.value = error.message;
   } finally {
     followUpSubmitting.value = false;
+  }
+}
+
+async function deleteFollowUp() {
+  const thread = store.selectedFollowUp;
+  if (!thread) return;
+  if (!window.confirm("确定删除这次追问会话吗？完整消息记录、高亮和标记都会一并删除，此操作不可撤销。")) return;
+  try {
+    await store.deleteFollowUp(thread.id);
+    pendingFollowUp.value = null;
+    followUpOpen.value = false;
+    followUpError.value = "";
+    notify("追问会话已删除");
+  } catch (error) {
+    notify(error.message, true);
   }
 }
 

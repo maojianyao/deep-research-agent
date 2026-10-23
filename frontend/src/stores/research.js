@@ -207,6 +207,20 @@ export const useResearchStore = defineStore("research", {
       this.closeFollowUpStream();
       return data.items;
     },
+    async deleteFollowUp(threadId = null) {
+      const target = threadId || this.selectedFollowUpId;
+      if (!this.runId || !target) return;
+      await api(
+        `/research-runs/${encodeURIComponent(this.runId)}/follow-ups/${encodeURIComponent(target)}`,
+        { method: "DELETE" },
+      );
+      const index = this.followUps.findIndex((item) => item.id === target);
+      if (index >= 0) this.followUps.splice(index, 1);
+      if (this.selectedFollowUpId === target) {
+        this.selectedFollowUpId = null;
+        this.closeFollowUpStream();
+      }
+    },
     selectFollowUp(threadId) {
       this.closeFollowUpStream();
       this.selectedFollowUpId = threadId;

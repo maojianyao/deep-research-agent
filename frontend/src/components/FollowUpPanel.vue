@@ -9,7 +9,16 @@
         <p class="text-[9px] font-bold tracking-[.14em] text-teal-800">FOLLOW-UP</p>
         <h2 class="mt-0.5 text-sm font-semibold">追问</h2>
       </div>
-      <button type="button" class="rounded px-2 py-1 text-lg text-slate-400 hover:bg-slate-100" aria-label="关闭追问" @click="$emit('close')">×</button>
+      <div class="flex items-center gap-1">
+        <button
+          v-if="canDelete"
+          type="button"
+          data-delete-follow-up
+          class="rounded px-2 py-1 text-[10px] text-rose-700 hover:bg-rose-50"
+          @click="$emit('delete')"
+        >删除</button>
+        <button type="button" class="rounded px-2 py-1 text-lg text-slate-400 hover:bg-slate-100" aria-label="关闭追问" @click="$emit('close')">×</button>
+      </div>
     </header>
 
     <div class="flex h-[calc(100%-57px)] min-h-0 flex-col">
@@ -83,8 +92,9 @@ const props = defineProps({
   messages: { type: Array, default: () => [] },
   busy: Boolean,
   error: { type: String, default: "" },
+  canDelete: Boolean,
 });
-const emit = defineEmits(["submit", "retry", "close"]);
+const emit = defineEmits(["submit", "retry", "delete", "close"]);
 const input = ref(null);
 const question = ref("");
 

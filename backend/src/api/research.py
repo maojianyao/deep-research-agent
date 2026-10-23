@@ -14,6 +14,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.responses import StreamingResponse
 
 from backend.src.research.schemas import ResearchRun, RunStatus
+from backend.src.api.follow_ups import cancel_follow_up_tasks
 from backend.src.services.follow_up import report_anchor_digest
 from backend.src.storage.repository import ResearchRunRepository
 from backend.src.utils.logger import get_logger
@@ -394,6 +395,11 @@ async def delete_research_run(run_id: str, request: Request):
     active = request.app.state.run_tasks.get(run_id)
     if active is not None and not active.done():
         raise HTTPException(status_code=409, detail="Cancel the active research run before deleting it")
+    thread_ids = [
+        item["id"]
+        for item in request.app.state.follow_up_repository.list_threads(run_id)
+    ]
+    await cancel_follow_up_tasks(request, thread_ids)
     deleted = await asyncio.to_thread(request.app.state.repository.delete_run, run_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Research run not found")

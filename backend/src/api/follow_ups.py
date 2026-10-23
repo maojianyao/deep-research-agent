@@ -93,6 +93,22 @@ def get_follow_up(run_id: str, thread_id: str, request: Request):
     return thread
 
 
+@router.delete("/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_follow_up(run_id: str, thread_id: str, request: Request):
+    _eligible_run(request.app.state.repository, run_id)
+    lock = request.app.state.follow_up_locks.setdefault(thread_id, asyncio.Lock())
+    async with lock:
+        await cancel_follow_up_tasks(request, [thread_id])
+        deleted = await asyncio.to_thread(
+            request.app.state.follow_up_repository.delete_thread,
+            run_id,
+            thread_id,
+        )
+        request.app.state.follow_up_locks.pop(thread_id, None)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Follow-up thread not found")
+
+
 @router.post("/{thread_id}/questions", response_model=FollowUpThreadView,
              status_code=status.HTTP_201_CREATED)
 async def append_follow_up_question(
@@ -268,6 +284,20 @@ def _start_generation(request: Request, started) -> None:
             tasks.pop(thread_id, None)
 
     task.add_done_callback(remove_finished)
+
+
+async def cancel_follow_up_tasks(request: Request, thread_ids: list[str]) -> None:
+    tasks: dict[str, asyncio.Task] = request.app.state.follow_up_tasks
+    cancelled = []
+    for thread_id in thread_ids:
+        task = tasks.get(thread_id)
+        if task is not None and not task.done():
+            task.cancel()
+            cancelled.append(task)
+    if cancelled:
+        await asyncio.gather(*cancelled, return_exceptions=True)
+    for thread_id in thread_ids:
+        tasks.pop(thread_id, None)
 
 
 async def _stream_chunks(answerer, started) -> AsyncIterator[str]:

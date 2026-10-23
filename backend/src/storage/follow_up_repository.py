@@ -160,6 +160,17 @@ class FollowUpRepository:
                 return None
             return self._to_dict(thread, self._thread_cursor(session, thread_id))
 
+    def delete_thread(self, run_id: str, thread_id: str) -> bool:
+        with Session(self.engine) as session, session.begin():
+            thread = session.scalar(select(FollowUpThreadModel).where(
+                FollowUpThreadModel.run_id == run_id,
+                FollowUpThreadModel.id == thread_id,
+            ))
+            if thread is None:
+                return False
+            session.delete(thread)
+        return True
+
     def retry_message(self, *, run_id: str, thread_id: str,
                       message_id: int) -> StartedFollowUp:
         with Session(self.engine) as session, session.begin():

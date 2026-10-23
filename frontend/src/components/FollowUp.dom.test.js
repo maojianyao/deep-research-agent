@@ -286,6 +286,96 @@ describe("report follow-up DOM", () => {
     expect(wrapper.findAll("[data-follow-up-marker]")).toHaveLength(2);
   });
 
+  test("deleting a conversation requires confirmation and removes its panel, highlight, and marker", async () => {
+    const first = {
+      id: "followup_delete",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [
+        { id: 61, role: "user", sequence: 1, content: "待删除问题", status: "completed" },
+        { id: 62, role: "assistant", sequence: 2, content: "待删除回答", status: "completed" },
+      ],
+      stream_cursor: 3,
+    };
+    const second = {
+      id: "followup_keep",
+      run_id: "run_followup",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [],
+      stream_cursor: 0,
+    };
+    let request;
+    globalThis.fetch.mockImplementation(async (url, options) => {
+      request = { url, method: options.method };
+      return { ok: true, status: 204, json: async () => null };
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const { wrapper } = mountCompletedReport([first, second]);
+    await nextTick();
+
+    const deleteButton = wrapper.find("[data-delete-follow-up]");
+    expect(deleteButton.exists()).toBe(true);
+    await deleteButton.trigger("click");
+    await flushPromises();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(true);
+
+    await deleteButton.trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(confirm.mock.calls[0][0]).toContain("删除");
+    expect(request).toEqual({
+      url: "/api/research-runs/run_followup/follow-ups/followup_delete",
+      method: "DELETE",
+    });
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(false);
+    expect(
+      wrapper.find('[data-thread-id="followup_delete"]').exists()
+    ).toBe(false);
+    expect(
+      wrapper.find('[data-thread-id="followup_keep"]').exists()
+    ).toBe(true);
+  });
+
+  test("research task deletion warning mentions owned follow-up conversations", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useResearchStore();
+    store.runId = null;
+    store.runs = [{
+      id: "run_with_conversations",
+      user_request: "带追问的研究",
+      status: "completed",
+      iteration: 1,
+      max_iterations: 1,
+      updated_at: "2026-10-23T09:00:00",
+    }];
+    store.total = 1;
+    store.loadRuns = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [pinia] },
+    });
+    const deleteButton = wrapper.findAll("button").find((button) => button.text() === "删除");
+    expect(deleteButton).toBeTruthy();
+
+    await deleteButton.trigger("click");
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0][0]).toContain("追问会话");
+  });
+
   test("clearing a report selection keeps the expanded generating stream connected", async () => {
     const thread = {
       id: "followup_generating",
