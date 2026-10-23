@@ -200,6 +200,25 @@ describe("research workspace overview", () => {
     await flushPromises();
     expect(requests.at(-1)).toContain("sort=updated_asc");
   });
+
+  test("shows iteration count as capped metadata rather than fabricated progress", async () => {
+    const item = runSummary("researching", {
+      iteration: 2,
+      max_iterations: 3,
+      unfinished_tasks: 4,
+    });
+    globalThis.fetch = vi.fn(async () => listResponse([item]));
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+
+    const row = wrapper.find(".research-row");
+    expect(row.find(".round-count").text()).toBe("第 2 / 3 轮");
+    expect(row.find(".round-note").text()).toBe("轮次上限");
+    expect(row.text()).not.toContain("%");
+  });
 });
 
 
