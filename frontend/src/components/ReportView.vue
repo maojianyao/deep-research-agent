@@ -56,7 +56,9 @@ const props = defineProps({
   direction: { type: String, default: "auto" },
   expanded: { type: Boolean, default: true },
 });
-const emit = defineEmits(["citation", "selection", "selection-error", "restore-follow-up"]);
+const emit = defineEmits([
+  "citation", "selection", "selection-error", "restore-follow-up", "headings", "heading-change",
+]);
 const reportBody = ref(null);
 const reportContent = ref(null);
 const highlights = ref([]);
@@ -333,18 +335,70 @@ function scheduleOverlays() {
   nextTick(rebuildOverlays);
 }
 
+function refreshHeadings() {
+  const content = reportContent.value;
+  if (!content) {
+    emit("headings", []);
+    return;
+  }
+  const items = Array.from(content.querySelectorAll("h1, h2, h3")).map((heading, index) => {
+    const id = `report-heading-${index + 1}`;
+    heading.id = id;
+    return {
+      id,
+      level: Number(heading.tagName.slice(1)),
+      text: heading.textContent?.trim() || `第 ${index + 1} 节`,
+    };
+  });
+  emit("headings", items);
+  updateActiveHeading();
+}
+
+function updateActiveHeading() {
+  const content = reportContent.value;
+  if (!content) return;
+  const headings = Array.from(content.querySelectorAll("h1, h2, h3"));
+  if (!headings.length) return;
+  let active = headings[0];
+  for (const heading of headings) {
+    if (heading.getBoundingClientRect().top <= 150) active = heading;
+    else break;
+  }
+  emit("heading-change", active.id);
+}
+
+function scrollToHeading(id) {
+  const heading = document.getElementById(id);
+  if (!reportContent.value?.contains(heading)) return;
+  heading?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function scrollToTop() {
+  reportBody.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 watch(
   [overlayState, html, () => props.expanded],
   rebuildOverlays,
   { deep: true, immediate: true, flush: "post" },
 );
+watch(
+  [html, () => props.expanded],
+  () => nextTick(refreshHeadings),
+  { immediate: true, flush: "post" },
+);
 onMounted(() => {
   window.addEventListener("resize", scheduleOverlays);
   window.addEventListener("scroll", scheduleOverlays, true);
+  window.addEventListener("scroll", updateActiveHeading, true);
   rebuildOverlays();
+  refreshHeadings();
 });
 onUnmounted(() => {
   window.removeEventListener("resize", scheduleOverlays);
   window.removeEventListener("scroll", scheduleOverlays, true);
+  window.removeEventListener("scroll", updateActiveHeading, true);
 });
+
+defineExpose({ scrollToHeading, scrollToTop });
 </script>

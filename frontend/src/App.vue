@@ -95,31 +95,108 @@
               <p class="mt-1 break-words">{{ runError }}</p>
             </div>
 
+            <nav class="dossier-tabs" role="tablist" aria-label="研究档案内容" aria-orientation="horizontal">
+              <button
+                v-for="tab in dossierTabs"
+                :id="`dossier-tab-${tab.id}`"
+                :key="tab.id"
+                type="button"
+                role="tab"
+                class="dossier-tab"
+                :aria-selected="activeDossierTab === tab.id"
+                :aria-controls="`dossier-panel-${tab.id}`"
+                :tabindex="activeDossierTab === tab.id ? 0 : -1"
+                @click="activeDossierTab = tab.id"
+                @keydown.right.prevent="moveDossierTab(1)"
+                @keydown.left.prevent="moveDossierTab(-1)"
+              >
+                <span>{{ tab.label }}</span>
+                <small>{{ tab.count }}</small>
+              </button>
+            </nav>
+
             <div class="dossier-layout">
               <div class="folio-stack">
-                <details data-report-section :open="reportOpen" class="folio-section" @toggle="handleReportToggle">
-                  <summary class="folio-summary"><h2>研究报告</h2><span class="folio-summary-meta">引用编号可查看来源 <span class="fold-chevron" aria-hidden="true">⌄</span></span></summary>
-                  <div class="folio-content"><div class="report-sheet"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" :follow-ups="store.followUps" :language="store.run.report?.language || store.run.report_language" :direction="store.run.report?.direction || store.run.report_direction" :expanded="reportOpen" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" @restore-follow-up="restoreFollowUp" /></div></div>
-                </details>
-
-                <details class="folio-section">
-                  <summary class="folio-summary"><h2>研究计划</h2><span class="folio-summary-meta">{{ completedTasks }} / {{ store.run.plan?.tasks?.length || 0 }} 项完成 <span class="fold-chevron" aria-hidden="true">⌄</span></span></summary>
-                  <div class="folio-content fold-scroll max-h-[480px] overflow-y-auto overscroll-contain">
-                    <template v-if="store.run.plan"><div class="plan-overview"><p class="plan-question">{{ store.run.plan.research_question }}</p><p class="plan-scope">{{ store.run.plan.scope }}</p><div class="domain-row"><span v-for="domain in store.run.plan.research_domains" :key="domain" class="domain-chip">{{ domain }}</span><span v-if="store.run.plan.risk_level === 'high'" class="domain-chip is-risk">高风险证据标准</span></div></div>
-                      <div class="plan-task-list"><article v-for="task in store.run.plan.tasks" :key="task.id" class="plan-task"><span class="task-state" :class="{ 'is-complete': task.completed }">{{ task.completed ? '✓' : '·' }}</span><div class="task-question">{{ task.question }}<p v-if="task.acceptance_criteria?.length" class="task-criteria">验收：{{ task.acceptance_criteria.join('；') }}</p></div><span class="task-type">{{ task.task_type }} / {{ task.priority }}</span></article></div>
-                    </template><p v-else class="empty-note">研究计划生成后会显示。</p>
+                <section
+                  v-if="activeDossierTab === 'report'"
+                  id="dossier-panel-report"
+                  role="tabpanel"
+                  aria-labelledby="dossier-tab-report"
+                  class="dossier-panel"
+                >
+                  <div v-if="reportHeadings.length" data-report-outline class="report-outline-bar">
+                    <span class="report-outline-status">
+                      {{ activeHeadingLabel || "报告目录" }}
+                    </span>
+                    <div class="report-outline-links">
+                      <button
+                        v-for="heading in reportHeadings"
+                        :key="heading.id"
+                        type="button"
+                        :class="{ 'is-active': activeHeadingId === heading.id }"
+                        @click="scrollToReportHeading(heading.id)"
+                      >{{ heading.text }}</button>
+                    </div>
+                    <button data-report-back-to-top type="button" @click="scrollToReportTop">顶部</button>
                   </div>
-                </details>
+                  <div class="report-sheet">
+                    <ReportView
+                      ref="reportView"
+                      :markdown="store.run.report?.markdown || ''"
+                      :active="store.isActive"
+                      :eligible="store.run.status === 'completed' && Boolean(store.run.report)"
+                      :follow-ups="store.followUps"
+                      :language="store.run.report?.language || store.run.report_language"
+                      :direction="store.run.report?.direction || store.run.report_direction"
+                      :expanded="true"
+                      @citation="showCitation"
+                      @headings="reportHeadings = $event"
+                      @heading-change="activeHeadingId = $event"
+                      @selection="openFollowUpSelection"
+                      @selection-error="notify($event, true)"
+                      @restore-follow-up="restoreFollowUp"
+                    />
+                  </div>
+                </section>
 
-                <details class="folio-section">
-                  <summary class="folio-summary"><h2>综合结论</h2><span class="folio-summary-meta">{{ store.run.findings.length }} 条 <span class="fold-chevron" aria-hidden="true">⌄</span></span></summary>
-                  <div class="folio-content fold-scroll max-h-[480px] overflow-y-auto overscroll-contain"><div class="finding-list"><article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry"><div class="finding-topline"><button class="reference-chip" @click="showCitation(finding.id)">{{ finding.classification }} / {{ finding.id }}</button><span class="text-[10px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div><p class="finding-text">{{ finding.statement }}</p><div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click="showCitation(id)">{{ id }}</button></div></article></div><p v-if="!store.run.findings.length" class="empty-note">当前还没有已综合的结论。</p></div>
-                </details>
+                <section
+                  v-else-if="activeDossierTab === 'plan'"
+                  id="dossier-panel-plan"
+                  role="tabpanel"
+                  aria-labelledby="dossier-tab-plan"
+                  class="dossier-panel"
+                >
+                  <div class="dossier-panel-heading"><h2>研究计划</h2><span>{{ completedTasks }} / {{ store.run.plan?.tasks?.length || 0 }} 项完成</span></div>
+                  <template v-if="store.run.plan">
+                    <div class="plan-overview"><p class="plan-question">{{ store.run.plan.research_question }}</p><p class="plan-scope">{{ store.run.plan.scope }}</p><div class="domain-row"><span v-for="domain in store.run.plan.research_domains" :key="domain" class="domain-chip">{{ domain }}</span><span v-if="store.run.plan.risk_level === 'high'" class="domain-chip is-risk">高风险证据标准</span></div></div>
+                    <div class="plan-task-list"><article v-for="task in store.run.plan.tasks" :key="task.id" class="plan-task"><span class="task-state" :class="{ 'is-complete': task.completed }">{{ task.completed ? '✓' : '·' }}</span><div class="task-question">{{ task.question }}<p v-if="task.acceptance_criteria?.length" class="task-criteria">验收：{{ task.acceptance_criteria.join('；') }}</p></div><span class="task-type">{{ task.task_type }} / {{ task.priority }}</span></article></div>
+                  </template>
+                  <p v-else class="empty-note">研究计划生成后会显示。</p>
+                </section>
 
-                <details class="folio-section">
-                  <summary class="folio-summary"><h2>审稿意见</h2><span class="folio-summary-meta">{{ store.run.critiques.length }} 轮 <span class="fold-chevron" aria-hidden="true">⌄</span></span></summary>
-                  <div class="folio-content fold-scroll max-h-[480px] overflow-y-auto overscroll-contain"><div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[10px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="showCitation(issue.finding_id)">{{ issue.finding_id }}</button></p></article></div><p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p></div>
-                </details>
+                <section
+                  v-else-if="activeDossierTab === 'findings'"
+                  id="dossier-panel-findings"
+                  role="tabpanel"
+                  aria-labelledby="dossier-tab-findings"
+                  class="dossier-panel"
+                >
+                  <div class="dossier-panel-heading"><h2>综合结论</h2><span>{{ store.run.findings.length }} 条</span></div>
+                  <div class="finding-list"><article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry"><div class="finding-topline"><button class="reference-chip" @click="showCitation(finding.id)">{{ finding.classification }} / {{ finding.id }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div><p class="finding-text">{{ finding.statement }}</p><div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click="showCitation(id)">{{ id }}</button></div></article></div>
+                  <p v-if="!store.run.findings.length" class="empty-note">当前还没有已综合的结论。</p>
+                </section>
+
+                <section
+                  v-else
+                  id="dossier-panel-critiques"
+                  role="tabpanel"
+                  aria-labelledby="dossier-tab-critiques"
+                  class="dossier-panel"
+                >
+                  <div class="dossier-panel-heading"><h2>审稿意见</h2><span>{{ store.run.critiques.length }} 轮</span></div>
+                  <div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="showCitation(issue.finding_id)">{{ issue.finding_id }}</button></p></article></div>
+                  <p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p>
+                </section>
               </div>
 
               <aside class="margin-rail">
@@ -208,6 +285,7 @@ import CreateResearchDialog from "./components/CreateResearchDialog.vue";
 const store = useResearchStore();
 const createDialog = ref(null);
 const citationDialog = ref(null);
+const reportView = ref(null);
 const citationSources = ref([]);
 const findingStatement = ref("");
 const citationLoading = ref(false);
@@ -217,7 +295,9 @@ const followUpSubmitting = ref(false);
 const followUpError = ref("");
 const windowWidth = ref(window.innerWidth);
 const windowHeight = ref(window.innerHeight);
-const reportOpen = ref(false);
+const activeDossierTab = ref("report");
+const reportHeadings = ref([]);
+const activeHeadingId = ref("");
 const creating = ref(false);
 const createError = ref("");
 const runLoading = ref(false);
@@ -226,6 +306,19 @@ const toastMessage = ref("");
 const toastError = ref(false);
 let toastTimer;
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
+const dossierTabs = computed(() => [
+  { id: "report", label: "研究报告", count: store.run?.report ? "正文" : "未生成" },
+  {
+    id: "plan",
+    label: "研究计划",
+    count: `${completedTasks.value} / ${store.run?.plan?.tasks?.length || 0} 项`,
+  },
+  { id: "findings", label: "综合结论", count: `${store.run?.findings?.length || 0} 条` },
+  { id: "critiques", label: "审稿意见", count: `${store.run?.critiques?.length || 0} 轮` },
+]);
+const activeHeadingLabel = computed(
+  () => reportHeadings.value.find((heading) => heading.id === activeHeadingId.value)?.text || "",
+);
 const runErrorMessage = computed(() => {
   const message = runLoadError.value || store.error;
   if (/not found/i.test(message || "")) {
@@ -393,10 +486,19 @@ function clearReportInteraction() {
   window.getSelection()?.removeAllRanges();
 }
 
-function handleReportToggle(event) {
-  reportOpen.value = event.currentTarget.open;
-  if (reportOpen.value) return;
-  clearReportInteraction();
+function scrollToReportHeading(id) {
+  activeHeadingId.value = id;
+  reportView.value?.scrollToHeading(id);
+}
+function moveDossierTab(direction) {
+  const current = dossierTabs.value.findIndex((tab) => tab.id === activeDossierTab.value);
+  const next = (current + direction + dossierTabs.value.length) % dossierTabs.value.length;
+  activeDossierTab.value = dossierTabs.value[next].id;
+  requestAnimationFrame(() => document.getElementById(`dossier-tab-${activeDossierTab.value}`)?.focus());
+}
+function scrollToReportTop() {
+  activeHeadingId.value = reportHeadings.value[0]?.id || "";
+  reportView.value?.scrollToTop();
 }
 
 async function restoreFollowUp(threadId) {
@@ -491,12 +593,14 @@ function updateViewport() {
 }
 
 watch(() => store.runId, () => {
-  reportOpen.value = false;
+  activeDossierTab.value = "report";
+  reportHeadings.value = [];
+  activeHeadingId.value = "";
   clearReportInteraction();
 });
-watch(() => store.run?.report, (report) => {
-  if (report) reportOpen.value = true;
-}, { immediate: true });
+watch(activeDossierTab, (tab) => {
+  if (tab !== "report") clearReportInteraction();
+});
 
 onMounted(() => {
   store.loadRuns();

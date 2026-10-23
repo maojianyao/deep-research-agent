@@ -219,7 +219,7 @@ describe("research run navigation", () => {
     await flushPromises();
 
     expect(wrapper.find(".run-title").text()).toContain("A routable research report");
-    expect(wrapper.find("[data-report-section]").element.open).toBe(true);
+    expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toContain("研究报告");
     expect(wrapper.find("[data-report-body]").exists()).toBe(true);
     expect(window.location.search).toBe(`?run=${run.id}`);
   });
@@ -268,5 +268,49 @@ describe("research run navigation", () => {
       "重新读取",
       "返回研究任务",
     ]);
+  });
+
+  test("uses the report as the primary dossier view and exposes a section outline", async () => {
+    const run = completedRun("run_reading");
+    run.report.markdown = [
+      "# Evidence report",
+      "",
+      "## Main finding",
+      "",
+      "Long-form report body.",
+      "",
+      "## Limitations",
+      "",
+      "Important limits.",
+    ].join("\n");
+    globalThis.fetch = routeFetch([run]);
+    window.history.replaceState({}, "", "/?run=run_reading");
+
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const tabs = wrapper.find('[role="tablist"][aria-label="研究档案内容"]');
+    expect(tabs.exists()).toBe(true);
+    const reportTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("研究报告"));
+    const planTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("研究计划"));
+    expect(reportTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[role="tabpanel"]').text()).toContain("Long-form report body");
+
+    await planTab.trigger("click");
+    expect(planTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[role="tabpanel"]').text()).toContain("Question");
+
+    await reportTab.trigger("click");
+    await flushPromises();
+
+    const outline = wrapper.find("[data-report-outline]");
+    expect(outline.exists()).toBe(true);
+    expect(outline.text()).toContain("Main finding");
+    expect(outline.text()).toContain("Limitations");
+    expect(wrapper.find("[data-report-back-to-top]").exists()).toBe(true);
   });
 });
