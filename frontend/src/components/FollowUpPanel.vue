@@ -2,9 +2,6 @@
   <aside
     data-follow-up-panel
     class="follow-up-panel fixed z-40 overflow-hidden border shadow-2xl"
-    :class="narrow
-      ? 'inset-x-0 bottom-0 h-[min(78vh,620px)] w-full rounded-t-2xl border-b-0'
-      : 'bottom-auto right-4 top-20 h-[496px] w-[288px] rounded-2xl'"
     :data-layout="narrow ? 'sheet' : 'floating'"
     aria-label="追问会话"
     role="dialog"
@@ -20,7 +17,8 @@
           v-if="canDelete"
           type="button"
           data-delete-follow-up
-          class="grid h-7 w-7 place-items-center rounded-full text-rose-600 hover:bg-rose-50"
+          data-touch-target="44"
+          class="grid h-11 w-11 place-items-center rounded-full text-rose-600 hover:bg-rose-50"
           aria-label="删除追问"
           title="删除追问"
           @click="$emit('delete')"
@@ -29,7 +27,7 @@
             <path d="M3.5 4.5h9M6 4.5V3h4v1.5M5 6v6.5h6V6M7 7.5v3.5M9 7.5v3.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
-        <button type="button" class="grid h-7 w-7 place-items-center rounded-full text-slate-400 hover:bg-slate-100" aria-label="最小化追问" title="最小化追问" @click="$emit('close')">
+        <button type="button" data-touch-target="44" class="grid h-11 w-11 place-items-center rounded-full text-slate-400 hover:bg-slate-100" aria-label="最小化追问" title="最小化追问" @click="$emit('close')">
           <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
             <path d="M4 8h8" stroke-linecap="round" />
           </svg>
@@ -38,13 +36,15 @@
     </header>
 
     <div class="flex h-[calc(100%-56px)] min-h-0 flex-col">
-      <div data-follow-up-messages class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4" aria-live="polite">
+      <p data-follow-up-live class="sr-only" aria-live="polite" aria-atomic="true">{{ liveStatus }}</p>
+      <div data-follow-up-messages class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <blockquote data-selected-passage class="reading-quote mr-8 rounded-xl border-l-2 border-[var(--citation)] bg-[#eef3ee] px-3 py-2.5 text-xs leading-6 text-[var(--ink)]">
           <p :class="passageExpanded ? '' : 'line-clamp-3'" class="whitespace-pre-wrap break-words">{{ passage }}</p>
           <button
             type="button"
             data-passage-toggle
-            class="mt-1 text-[9px] font-medium text-amber-800 hover:underline"
+            data-touch-target="44"
+            class="mt-1 min-h-11 text-[10px] font-medium text-amber-800 hover:underline"
             @click="passageExpanded = !passageExpanded"
           >{{ passageExpanded ? "收起引用" : "展开引用" }}</button>
         </blockquote>
@@ -76,7 +76,8 @@
             v-if="message.role === 'assistant' && ['failed', 'interrupted'].includes(message.status)"
             type="button"
             data-retry-answer
-            class="mt-1 rounded-full border border-[#ddc3c3] bg-white px-2.5 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[#f7eceb] disabled:opacity-40"
+            data-touch-target="44"
+            class="mt-1 min-h-11 rounded-full border border-[#ddc3c3] bg-white px-3 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[#f7eceb] disabled:opacity-40"
             :disabled="busy"
             @click="$emit('retry', message.id)"
           >重试回答</button>
@@ -103,7 +104,8 @@
           <span class="text-[10px]" :class="tooLong ? 'font-semibold text-[var(--danger)]' : 'text-[var(--muted)]'">{{ questionLength }} / 2000</span>
           <button
             type="submit"
-            class="h-8 rounded-full bg-[var(--petrol)] px-4 text-[11px] font-semibold text-white disabled:opacity-40"
+            data-touch-target="44"
+            class="h-11 rounded-full bg-[var(--petrol)] px-4 text-[11px] font-semibold text-white disabled:opacity-40"
             :disabled="busy || !question.trim() || tooLong"
           >发送</button>
         </div>
@@ -133,6 +135,15 @@ const question = ref("");
 const passageExpanded = ref(false);
 const questionLength = computed(() => Array.from(question.value).length);
 const tooLong = computed(() => questionLength.value > 2000);
+const liveStatus = computed(() => {
+  if (props.busy) return "正在生成回答";
+  const latest = [...props.messages].reverse().find((message) => message.role === "assistant");
+  if (!latest) return "";
+  if (latest.status === "completed") return "回答已完成";
+  if (latest.status === "failed") return "回答生成失败，可以重试";
+  if (latest.status === "interrupted") return "回答生成被中断，可以重试";
+  return "";
+});
 
 function focusInput() {
   nextTick(() => input.value?.focus());

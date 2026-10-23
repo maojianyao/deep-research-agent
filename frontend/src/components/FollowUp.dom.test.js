@@ -122,7 +122,8 @@ describe("report follow-up DOM", () => {
     expect(trigger.exists()).toBe(true);
     expect(trigger.text()).toContain("提问");
     expect(trigger.classes()).toContain("rounded-full");
-    expect(trigger.classes()).toContain("h-7");
+    expect(trigger.classes()).toContain("min-h-11");
+    expect(trigger.attributes("data-touch-target")).toBe("44");
     expect(trigger.classes()).toContain("text-[11px]");
     expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("h-3");
     expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("w-3");
@@ -231,6 +232,19 @@ describe("report follow-up DOM", () => {
     expect(top).toBeLessThanOrEqual(320 - 44);
   });
 
+  test("keyboard selection changes expose the question action", async () => {
+    vi.useFakeTimers();
+    const { wrapper } = mountCompletedReport();
+    const body = wrapper.find("[data-report-body]");
+    selectNode(body.element.querySelector("p"));
+
+    document.dispatchEvent(new Event("selectionchange"));
+    await vi.advanceTimersByTimeAsync(100);
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(true);
+  });
+
   test("desktop and narrow conversations expose semantic floating and bottom-sheet layouts", async () => {
     const thread = {
       id: "followup_layout",
@@ -266,8 +280,6 @@ describe("report follow-up DOM", () => {
     await nextTick();
     panel = narrow.wrapper.find("[data-follow-up-panel]");
     expect(panel.attributes("data-layout")).toBe("sheet");
-    expect(panel.classes()).toContain("w-full");
-    expect(panel.classes()).toContain("bottom-0");
     expect(panel.find('[aria-label="最小化追问"]').exists()).toBe(true);
     expect(panel.find("[data-delete-follow-up]").exists()).toBe(true);
     const marker = narrow.wrapper.find(
@@ -279,6 +291,78 @@ describe("report follow-up DOM", () => {
     expect(left).toBeGreaterThanOrEqual(2);
     expect(top).toBeGreaterThanOrEqual(2);
     expect(left).toBeLessThanOrEqual(420 - 22);
+  });
+
+  test("follow-up controls expose large touch targets and a focused status region", async () => {
+    const thread = {
+      id: "followup_accessibility",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Example", start: 0, end: 7, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [{
+        id: 90,
+        role: "assistant",
+        sequence: 1,
+        content: "A completed answer",
+        status: "completed",
+      }],
+      stream_cursor: 2,
+    };
+    const markerThread = {
+      ...thread,
+      id: "followup_accessibility_marker",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+    };
+    const { wrapper } = mountCompletedReport([thread, markerThread]);
+    await nextTick();
+    const panel = wrapper.find("[data-follow-up-panel]");
+    const marker = wrapper.find("[data-follow-up-marker]");
+
+    expect(panel.find('[aria-label="最小化追问"]').attributes("data-touch-target")).toBe("44");
+    expect(panel.find("[data-delete-follow-up]").attributes("data-touch-target")).toBe("44");
+    expect(panel.find('button[type="submit"]').attributes("data-touch-target")).toBe("44");
+    expect(marker.attributes("data-touch-target")).toBe("44");
+    expect(panel.find("[data-follow-up-messages]").attributes("aria-live")).toBeUndefined();
+    expect(panel.find("[data-follow-up-live]").attributes("aria-live")).toBe("polite");
+    expect(panel.find("[data-follow-up-live]").text()).toContain("回答已完成");
+  });
+
+  test("minimizing a persisted conversation returns focus to its report marker", async () => {
+    const thread = {
+      id: "followup_focus_return",
+      run_id: "run_followup",
+      is_minimized: false,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [],
+      stream_cursor: 0,
+    };
+    globalThis.fetch.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: [{ ...thread, is_minimized: true }] }),
+    }));
+    const { wrapper } = mountCompletedReport(thread);
+    await nextTick();
+
+    await wrapper.find('[aria-label="最小化追问"]').trigger("click");
+    await flushPromises();
+    await nextTick();
+
+    const marker = wrapper.find(
+      '[data-follow-up-marker][data-thread-id="followup_focus_return"]',
+    );
+    expect(marker.exists()).toBe(true);
+    expect(document.activeElement).toBe(marker.element);
   });
 
   test("contiguous selection across markdown block types emits a reloadable anchor", async () => {
@@ -807,9 +891,8 @@ describe("report follow-up DOM", () => {
     await nextTick();
 
     const panel = wrapper.find("[data-follow-up-panel]");
-    expect(panel.classes()).toContain("w-[288px]");
-    expect(panel.classes()).toContain("h-[496px]");
-    expect(panel.classes()).toContain("rounded-2xl");
+    expect(panel.attributes("data-layout")).toBe("floating");
+    expect(panel.classes()).not.toContain("w-[288px]");
     expect(panel.text()).toContain("请解释这一段。");
     expect(panel.find("strong").text()).toBe("安全答案");
     expect(panel.find("script").exists()).toBe(false);
@@ -827,13 +910,13 @@ describe("report follow-up DOM", () => {
     expect(panel.find("[data-follow-up-input]").attributes("placeholder")).toBe("继续提问...");
     expect(panel.find('button[type="submit"]').classes()).toContain("rounded-full");
     expect(panel.find('button[type="submit"]').classes()).toContain("text-[11px]");
-    expect(panel.find('[aria-label="最小化追问"]').classes()).toContain("h-7");
-    expect(panel.find("[data-delete-follow-up]").classes()).toContain("h-7");
+    expect(panel.find('[aria-label="最小化追问"]').classes()).toContain("h-11");
+    expect(panel.find("[data-delete-follow-up]").classes()).toContain("h-11");
     expect(panel.find("[data-passage-toggle]").exists()).toBe(true);
     expect(document.activeElement).toBe(panel.find("[data-follow-up-input]").element);
   });
 
-  test("report highlight has underline styling and minimized marker stays fixed at 18px", async () => {
+  test("report highlight has underline styling and a 44px minimized marker target", async () => {
     const thread = {
       id: "followup_style",
       is_minimized: true,
@@ -859,8 +942,9 @@ describe("report follow-up DOM", () => {
     expect(highlight.classes()).toContain("border-emerald-500");
     const marker = wrapper.find("[data-follow-up-marker]");
     expect(marker.classes()).toContain("fixed");
-    expect(marker.classes()).toContain("h-[18px]");
-    expect(marker.classes()).toContain("w-[18px]");
+    expect(marker.classes()).toContain("h-11");
+    expect(marker.classes()).toContain("w-11");
+    expect(marker.attributes("data-touch-target")).toBe("44");
   });
 
   test("minimized marker hides when its selection scrolls outside the viewport", async () => {

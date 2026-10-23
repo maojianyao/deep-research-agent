@@ -251,8 +251,9 @@
       v-if="pendingFollowUp"
       data-follow-up-trigger
       type="button"
-      class="follow-up-trigger fixed z-30 inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold leading-none text-white transition-colors"
-      :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y - 36, windowHeight - 44))}px` }"
+      class="follow-up-trigger fixed z-30 inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-[11px] font-semibold leading-none text-white transition-colors"
+      data-touch-target="44"
+      :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 80))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y - 48, windowHeight - 52))}px` }"
       aria-label="对选中内容提问"
       @mousedown.prevent
       @click="openFollowUpPanel"
@@ -616,6 +617,7 @@ async function deleteFollowUp() {
 }
 
 async function closeFollowUp() {
+  const threadId = store.selectedFollowUp?.id || "";
   const hadPersistedThread = Boolean(store.selectedFollowUp);
   if (hadPersistedThread) {
     try {
@@ -630,6 +632,12 @@ async function closeFollowUp() {
   pendingFollowUp.value = null;
   followUpOpen.value = false;
   followUpError.value = "";
+  await nextTick();
+  const marker = threadId
+    ? document.querySelector(`[data-follow-up-marker][data-thread-id="${threadId}"]`)
+    : null;
+  if (marker) marker.focus();
+  else reportView.value?.focusReport();
 }
 
 function updateViewport() {

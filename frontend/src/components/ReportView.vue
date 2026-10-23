@@ -2,6 +2,7 @@
   <div
     ref="reportBody"
     data-report-body
+    tabindex="-1"
     class="relative"
     :lang="language || undefined"
     :dir="direction || 'auto'"
@@ -32,13 +33,14 @@
         type="button"
         data-follow-up-marker
         :data-thread-id="marker.threadId"
-        class="pointer-events-auto fixed z-30 grid h-[18px] w-[18px] place-items-center rounded-full border-2 border-white bg-emerald-600 text-[8px] font-bold text-white shadow-sm hover:bg-emerald-700"
+        class="follow-up-marker pointer-events-auto fixed z-30 grid h-11 w-11 place-items-center border-0 bg-transparent p-0"
+        data-touch-target="44"
         :style="marker.style"
         title="恢复追问"
-        aria-label="恢复追问"
+        :aria-label="`恢复追问：${marker.anchorText}`"
         @mousedown.prevent.stop
         @click.stop="$emit('restore-follow-up', marker.threadId)"
-      >追</button>
+      ><span class="follow-up-marker-face" aria-hidden="true">追</span></button>
     </div>
   </div>
 </template>
@@ -64,6 +66,7 @@ const reportBody = ref(null);
 const reportContent = ref(null);
 const highlights = ref([]);
 const markers = ref([]);
+let selectionTimer;
 
 const html = computed(() => safeMarkdown(props.markdown, {
   citationLabels: props.citationLabels,
@@ -318,14 +321,15 @@ function rebuildOverlays() {
       if (!intersectsViewport) return;
       const left = Math.max(
         2,
-        Math.min(first.right + 3, window.innerWidth - 20),
+        Math.min(first.right + 3, window.innerWidth - 46),
       );
       const top = Math.max(
         2,
-        Math.min(first.top - 2, window.innerHeight - 20),
+        Math.min(first.top - 2, window.innerHeight - 46),
       );
       nextMarkers.push({
         threadId: thread.id,
+        anchorText: thread.anchor.text.slice(0, 40),
         style: {
           left: `${left}px`,
           top: `${top}px`,
@@ -339,6 +343,11 @@ function rebuildOverlays() {
 
 function scheduleOverlays() {
   nextTick(rebuildOverlays);
+}
+
+function scheduleSelectionCapture() {
+  clearTimeout(selectionTimer);
+  selectionTimer = setTimeout(captureSelection, 60);
 }
 
 function refreshHeadings() {
@@ -396,6 +405,10 @@ function focusCitation(referenceId, occurrenceIndex = 0) {
   return true;
 }
 
+function focusReport() {
+  reportBody.value?.focus();
+}
+
 watch(
   [overlayState, html, () => props.expanded],
   rebuildOverlays,
@@ -410,6 +423,7 @@ onMounted(() => {
   window.addEventListener("resize", scheduleOverlays);
   window.addEventListener("scroll", scheduleOverlays, true);
   window.addEventListener("scroll", updateActiveHeading, true);
+  document.addEventListener("selectionchange", scheduleSelectionCapture);
   rebuildOverlays();
   refreshHeadings();
 });
@@ -417,7 +431,9 @@ onUnmounted(() => {
   window.removeEventListener("resize", scheduleOverlays);
   window.removeEventListener("scroll", scheduleOverlays, true);
   window.removeEventListener("scroll", updateActiveHeading, true);
+  document.removeEventListener("selectionchange", scheduleSelectionCapture);
+  clearTimeout(selectionTimer);
 });
 
-defineExpose({ scrollToHeading, scrollToTop, focusCitation });
+defineExpose({ scrollToHeading, scrollToTop, focusCitation, focusReport });
 </script>

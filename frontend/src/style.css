@@ -675,8 +675,35 @@ fieldset.dialog-field-label { border: 0; padding: 0; }
 .follow-up-trigger { background: var(--petrol); box-shadow: 0 8px 18px rgb(23 61 68 / .22); }
 .follow-up-trigger:hover { background: var(--petrol-soft); }
 .follow-up-panel { border-color: var(--line-strong); background: var(--surface); }
-.follow-up-panel[data-layout="floating"] { top: 78px; right: 20px; width: 340px; height: 520px; }
-.follow-up-panel[data-layout="sheet"] { width: 100%; }
+.follow-up-panel[data-layout="floating"] {
+  top: 78px;
+  right: 20px;
+  bottom: auto;
+  width: min(360px, calc(100vw - 32px));
+  height: 520px;
+  border-radius: 16px;
+}
+.follow-up-panel[data-layout="sheet"] {
+  inset: auto 0 0;
+  width: 100%;
+  height: min(78vh, 620px);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+}
+.follow-up-marker-face {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 1px 4px rgb(23 61 68 / .22);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+}
+.follow-up-marker:hover .follow-up-marker-face { background: #2f624b; }
 .follow-up-panel .markdown-content { font-family: var(--font-ui); font-size: 12px; line-height: 1.65; }
 
 .citation-id {
