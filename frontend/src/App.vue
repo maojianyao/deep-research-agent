@@ -109,11 +109,27 @@
       v-if="pendingFollowUp"
       data-follow-up-trigger
       type="button"
-      class="fixed z-30 rounded bg-amber-600 px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-lg hover:bg-amber-700"
+      class="fixed z-30 inline-flex items-center gap-1 rounded-full bg-amber-500 px-3 py-1.5 text-[9px] font-medium leading-none text-white shadow-md shadow-amber-900/15 transition-colors hover:bg-amber-600"
       :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y - 36, windowHeight - 44))}px` }"
+      aria-label="对选中内容提问"
       @mousedown.prevent
       @click="openFollowUpPanel"
-    >提问</button>
+    >
+      <svg
+        data-follow-up-trigger-icon
+        class="h-3 w-3 shrink-0"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M3 3.5h10v7H7.2L4 13v-2.5H3z" />
+      </svg>
+      <span>提问</span>
+    </button>
     <FollowUpPanel
       v-if="followUpOpen || store.selectedFollowUp"
       :passage="pendingFollowUp?.anchor.text || store.selectedFollowUp?.anchor.text || ''"

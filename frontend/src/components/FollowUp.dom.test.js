@@ -120,6 +120,9 @@ describe("report follow-up DOM", () => {
     const trigger = wrapper.find("[data-follow-up-trigger]");
     expect(trigger.exists()).toBe(true);
     expect(trigger.text()).toContain("提问");
+    expect(trigger.classes()).toContain("rounded-full");
+    expect(trigger.classes()).toContain("text-[9px]");
+    expect(trigger.find("[data-follow-up-trigger-icon]").exists()).toBe(true);
 
     await trigger.trigger("click");
     await nextTick();
