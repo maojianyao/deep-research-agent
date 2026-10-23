@@ -109,7 +109,7 @@
       v-if="pendingFollowUp"
       data-follow-up-trigger
       type="button"
-      class="fixed z-30 inline-flex h-5 items-center gap-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-medium leading-none text-white shadow-md shadow-amber-900/15 transition-colors hover:bg-amber-600"
+      class="fixed z-30 inline-flex h-5 items-center gap-0.5 rounded-full bg-amber-500 px-1.5 text-[5px] font-medium leading-none text-white shadow-md shadow-amber-900/15 transition-colors hover:bg-amber-600"
       :style="{ left: `${Math.max(8, Math.min(pendingFollowUp.position.x + 8, windowWidth - 64))}px`, top: `${Math.max(8, Math.min(pendingFollowUp.position.y - 36, windowHeight - 44))}px` }"
       aria-label="对选中内容提问"
       @mousedown.prevent

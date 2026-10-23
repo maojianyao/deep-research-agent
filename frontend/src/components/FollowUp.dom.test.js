@@ -94,6 +94,7 @@ function setViewport(width, height = 800) {
 afterEach(() => {
   window.getSelection()?.removeAllRanges();
   document.body.innerHTML = "";
+  delete Range.prototype.getClientRects;
   setViewport(1024, 800);
   vi.restoreAllMocks();
 });
@@ -122,7 +123,7 @@ describe("report follow-up DOM", () => {
     expect(trigger.text()).toContain("提问");
     expect(trigger.classes()).toContain("rounded-full");
     expect(trigger.classes()).toContain("h-5");
-    expect(trigger.classes()).toContain("text-[10px]");
+    expect(trigger.classes()).toContain("text-[5px]");
     expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("h-2.5");
     expect(trigger.find("[data-follow-up-trigger-icon]").classes()).toContain("w-2.5");
 
@@ -775,7 +776,10 @@ describe("report follow-up DOM", () => {
     expect(panel.find("[data-message-role='assistant']").classes()).toContain("max-w-[90%]");
     expect(panel.find("[data-message-role='assistant']").classes()).not.toContain("ml-auto");
     expect(panel.find("[data-follow-up-input]").classes()).toContain("rounded-xl");
+    expect(panel.find("[data-follow-up-input]").classes()).toContain("text-[5px]");
+    expect(panel.find("[data-follow-up-input]").attributes("placeholder")).toBe("继续提问");
     expect(panel.find('button[type="submit"]').classes()).toContain("rounded-full");
+    expect(panel.find('button[type="submit"]').classes()).toContain("text-[7px]");
     expect(panel.find('[aria-label="最小化追问"]').classes()).toContain("h-7");
     expect(panel.find("[data-delete-follow-up]").classes()).toContain("h-7");
     expect(panel.find("[data-passage-toggle]").exists()).toBe(true);
@@ -810,6 +814,46 @@ describe("report follow-up DOM", () => {
     expect(marker.classes()).toContain("fixed");
     expect(marker.classes()).toContain("h-[18px]");
     expect(marker.classes()).toContain("w-[18px]");
+  });
+
+  test("minimized marker hides when its selection scrolls outside the viewport", async () => {
+    let markerRect = {
+      left: 120, right: 140, top: 80, bottom: 96, width: 20, height: 16,
+    };
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: vi.fn(() => [markerRect]),
+    });
+    const thread = {
+      id: "followup_scroll_marker",
+      is_minimized: true,
+      anchor: {
+        text: "Summary", start: 23, end: 30, prefix: "", suffix: "",
+        report_digest: "a".repeat(64),
+      },
+      messages: [],
+    };
+    const wrapper = mount(ReportView, {
+      attachTo: document.body,
+      props: {
+        markdown: completedRun().report.markdown,
+        active: false,
+        eligible: true,
+        followUps: [thread],
+      },
+    });
+    await nextTick();
+    expect(wrapper.find("[data-follow-up-marker]").exists()).toBe(true);
+
+    markerRect = {
+      left: 120, right: 140, top: -80, bottom: -64, width: 20, height: 16,
+    };
+    window.dispatchEvent(new Event("scroll"));
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-marker]").exists()).toBe(false);
+    expect(wrapper.find("[data-follow-up-highlight]").exists()).toBe(true);
   });
 
   test("failed answer shows an error and retry replaces the same assistant response", async () => {

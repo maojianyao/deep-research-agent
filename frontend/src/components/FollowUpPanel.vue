@@ -95,15 +95,15 @@
           data-follow-up-input
           maxlength="2000"
           rows="2"
-          class="w-full resize-none rounded-xl border border-slate-200 p-2 text-[10px] leading-5 outline-none focus:border-teal-700"
-          placeholder="就这段内容继续提问…"
+          class="w-full resize-none rounded-xl border border-slate-200 p-2 text-[5px] leading-5 outline-none focus:border-teal-700"
+          placeholder="继续提问"
           @keydown.enter.exact.prevent="submit"
         ></textarea>
         <div class="mt-1.5 flex items-center justify-between">
           <span class="text-[9px]" :class="tooLong ? 'font-semibold text-rose-700' : 'text-slate-400'">{{ questionLength }} / 2000</span>
           <button
             type="submit"
-            class="h-6 rounded-full bg-teal-800 px-3 text-[9px] font-semibold text-white disabled:opacity-40"
+            class="h-6 rounded-full bg-teal-800 px-3 text-[7px] font-semibold text-white disabled:opacity-40"
             :disabled="busy || !question.trim() || tooLong"
           >发送</button>
         </div>

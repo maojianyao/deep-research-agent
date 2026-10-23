@@ -270,11 +270,19 @@ function rebuildOverlays() {
   props.followUps.forEach((thread, threadIndex) => {
     const range = rangeForAnchor(content, nodes, thread.anchor);
     if (!range) return;
-    const rawRects = typeof range.getClientRects === "function"
+    const hasRangeRects = typeof range.getClientRects === "function";
+    const rawRects = hasRangeRects
       ? Array.from(range.getClientRects())
       : [];
     const rects = rawRects.filter((rect) => rect.width > 0 && rect.height > 0);
-    const fallback = { left: 0, top: threadIndex * 28, width: 120, height: 16, right: 120 };
+    const fallback = {
+      left: 0,
+      top: threadIndex * 28,
+      width: 120,
+      height: 16,
+      right: 120,
+      bottom: threadIndex * 28 + 16,
+    };
     const positioned = (rects.length ? rects : [fallback]).map((rect) => ({
       left: `${rect.left - base.left}px`,
       top: `${rect.top - base.top}px`,
@@ -287,7 +295,14 @@ function rebuildOverlays() {
       style,
     }));
     if (thread.is_minimized) {
-      const first = rects[0] || fallback;
+      const first = rects[0] || (hasRangeRects ? null : fallback);
+      if (!first) return;
+      const intersectsViewport =
+        first.bottom > 0
+        && first.top < window.innerHeight
+        && first.right > 0
+        && first.left < window.innerWidth;
+      if (!intersectsViewport) return;
       const left = Math.max(
         2,
         Math.min(first.right + 3, window.innerWidth - 20),
