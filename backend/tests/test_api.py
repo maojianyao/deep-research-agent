@@ -195,6 +195,35 @@ class ResearchApiTests(unittest.TestCase):
         })
         self.assertEqual(invalid.status_code, 422)
 
+    def test_language_preview_explains_the_language_that_will_be_used(self):
+        inferred = self.client.post("/api/research-runs/language-preview", json={
+            "user_request": "请研究人工智能治理政策",
+        })
+        explicit = self.client.post("/api/research-runs/language-preview", json={
+            "user_request": "研究一项政策",
+            "report_language": "Japanese",
+        })
+        invalid = self.client.post("/api/research-runs/language-preview", json={
+            "user_request": "Research this",
+            "report_language": "not a language!",
+        })
+
+        self.assertEqual(inferred.status_code, 200, inferred.text)
+        self.assertEqual(inferred.json(), {
+            "tag": "zh-CN",
+            "name": "简体中文",
+            "quality": "verified",
+            "source": "detected",
+        })
+        self.assertEqual(explicit.status_code, 200, explicit.text)
+        self.assertEqual(explicit.json(), {
+            "tag": "ja",
+            "name": "日本語",
+            "quality": "verified",
+            "source": "explicit",
+        })
+        self.assertEqual(invalid.status_code, 422)
+
     def test_detail_and_list_expose_language_quality_and_direction(self):
         run = make_persisted_run()
         run.report_language = "ar"

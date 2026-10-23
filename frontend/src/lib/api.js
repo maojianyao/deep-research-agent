@@ -1,7 +1,10 @@
 export async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
   });
   if (!response.ok) {
     let message = `请求失败 (${response.status})`;

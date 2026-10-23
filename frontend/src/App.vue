@@ -136,32 +136,13 @@
       </main>
     </div>
 
-    <dialog ref="createDialog" class="research-dialog fixed left-1/2 top-1/2 m-0 max-h-[88vh] w-[min(620px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-0 shadow-2xl">
-      <form class="p-6 sm:p-7" @submit.prevent="submitResearch">
-        <div class="mb-6 flex items-start justify-between gap-4">
-          <div><p class="dialog-kicker">新建研究</p><h2 class="dialog-title">先写下你想弄清的问题</h2><p class="section-note mt-2 max-w-lg">系统会拆解研究任务、追踪来源，并把结论与证据一起保存。</p></div>
-          <button type="button" class="rounded p-1.5 text-xl text-[var(--muted)] hover:bg-[#eef3ef]" aria-label="关闭" @click="closeCreateDialog">×</button>
-        </div>
-        <label for="topic" class="dialog-field-label mb-2 block">研究主题或问题</label>
-        <textarea id="topic" v-model="topic" maxlength="2000" required class="dialog-input min-h-36 w-full resize-y p-3 leading-7" placeholder="例如：评估某项政策对中小企业创新投入的影响，重点关注实施机制、效果证据与地区差异。"></textarea>
-        <div class="dialog-help mt-1 flex justify-between gap-4"><span>技术、商业、政策、科学、人物与事件都可以研究</span><span class="shrink-0">{{ topic.length }} / 2000</span></div>
-        <div class="mt-5 grid gap-4 sm:grid-cols-2">
-          <div>
-            <label for="report-language" class="dialog-field-label mb-2 block">报告语言</label>
-            <input id="report-language" v-model.trim="reportLanguage" list="report-language-options" class="dialog-input h-10 w-full px-3" placeholder="跟随研究请求，例如 en">
-          </div>
-          <div>
-            <label for="iterations" class="dialog-field-label mb-2 block">初始研究轮次</label>
-            <select id="iterations" v-model.number="iterations" class="dialog-input h-10 w-full px-3"><option v-for="count in 5" :key="count" :value="count">{{ count }} 轮</option></select>
-          </div>
-        </div>
-        <datalist id="report-language-options">
-          <option v-for="language in reportLanguages" :key="language.tag" :value="language.tag">{{ language.label }}</option>
-        </datalist>
-        <p class="dialog-help mt-2">报告、计划、结论与追问使用所选语言；来源标题和原文摘录保持原语言。达到轮次上限但没有可写结论时，会自动追加一轮补证。</p>
-        <div class="mt-6 flex justify-end gap-2"><button type="button" class="dialog-cancel" @click="closeCreateDialog">取消</button><button class="dialog-submit disabled:opacity-50" :disabled="creating">{{ creating ? '正在发起…' : '开始研究' }}</button></div>
-      </form>
-    </dialog>
+    <CreateResearchDialog
+      ref="createDialog"
+      :creating="creating"
+      :error="createError"
+      @create="submitResearch"
+      @close="createError = ''"
+    />
 
     <CitationDialog ref="citationDialog" :sources="citationSources" :finding-statement="findingStatement" :loading="citationLoading" />
     <button
@@ -214,6 +195,7 @@ import ResearchList from "./components/ResearchList.vue";
 import ReportView from "./components/ReportView.vue";
 import CitationDialog from "./components/CitationDialog.vue";
 import FollowUpPanel from "./components/FollowUpPanel.vue";
+import CreateResearchDialog from "./components/CreateResearchDialog.vue";
 
 const store = useResearchStore();
 const createDialog = ref(null);
@@ -227,29 +209,14 @@ const followUpSubmitting = ref(false);
 const followUpError = ref("");
 const windowWidth = ref(window.innerWidth);
 const windowHeight = ref(window.innerHeight);
-const topic = ref("");
-const reportLanguage = ref("");
 const reportOpen = ref(false);
-const iterations = ref(3);
 const creating = ref(false);
+const createError = ref("");
 const runLoading = ref(false);
 const runLoadError = ref("");
 const toastMessage = ref("");
 const toastError = ref(false);
 let toastTimer;
-const reportLanguages = [
-  { tag: "zh-CN", label: "简体中文 · 已验证" },
-  { tag: "en", label: "English · 已验证" },
-  { tag: "ja", label: "日本語 · 已验证" },
-  { tag: "es", label: "Español · 已验证" },
-  { tag: "ar", label: "العربية · 已验证" },
-  { tag: "fr", label: "Français" },
-  { tag: "de", label: "Deutsch" },
-  { tag: "ko", label: "한국어" },
-  { tag: "pt", label: "Português" },
-  { tag: "hi", label: "हिन्दी" },
-];
-
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
 const runErrorMessage = computed(() => {
   const message = runLoadError.value || store.error;
@@ -272,8 +239,7 @@ const progress = computed(() => {
 const today = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
 const connectionLabel = computed(() => ({ online: "API 已连接", stream: "实时连接", polling: "轮询回退", offline: "API 未连接", connecting: "正在连接" })[store.connection]);
 
-function openCreateDialog() { createDialog.value?.showModal(); }
-function closeCreateDialog() { createDialog.value?.close(); }
+function openCreateDialog() { createError.value = ""; createDialog.value?.open(); }
 function formatDate(value) { return value ? new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—"; }
 function statusLabel(status) { return ({ planning: "规划中", researching: "研究中", reviewing_evidence: "审查中", synthesizing: "综合中", critic_review: "反方审阅", writing: "撰写报告", paused: "已暂停", completed: "已完成", needs_human_review: "待人工复核", failed: "失败", cancelled: "已结束" })[status] || status; }
 function statusClass(status) {
@@ -335,17 +301,24 @@ async function handlePopState() {
   }
   if (id !== store.runId || !store.run) await loadRunFromRoute(id);
 }
-async function submitResearch() {
-  if (!topic.value.trim()) return;
+async function submitResearch(payload) {
+  if (!payload.topic.trim()) return;
   creating.value = true;
+  createError.value = "";
   try {
-    const result = await store.createRun(topic.value.trim(), iterations.value, reportLanguage.value);
+    const result = await store.createRun(
+      payload.topic.trim(),
+      payload.iterations,
+      payload.reportLanguage,
+    );
     syncRunUrl(result.id, "replace");
-    topic.value = "";
-    reportLanguage.value = "";
-    closeCreateDialog();
+    createDialog.value?.reset();
+    createDialog.value?.close();
     notify("研究已发起");
-  } catch (error) { notify(error.message, true); }
+  } catch (error) {
+    createError.value = error.message;
+    notify(error.message, true);
+  }
   finally { creating.value = false; }
 }
 async function runAction(action) {

@@ -27,6 +27,28 @@ class CreateResearchRun(BaseModel):
             raise ValueError(str(exc)) from exc
 
 
+class PreviewReportLanguage(BaseModel):
+    user_request: str = Field(min_length=1, max_length=2000)
+    report_language: str | None = None
+
+    @field_validator("report_language")
+    @classmethod
+    def validate_report_language(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        try:
+            return canonicalize_language(value)
+        except InvalidLanguageTag as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class ReportLanguagePreview(BaseModel):
+    tag: str
+    name: str
+    quality: str
+    source: str
+
+
 class AcceptedResearchRun(BaseModel):
     id: str
     status: RunStatus

@@ -21,7 +21,7 @@ from backend.src.storage.repository import ACTIVE_RESEARCH_STATUSES, ResearchRun
 from backend.src.utils.logger import get_logger
 from .schemas import (
     AcceptedResearchRun, CitationReferenceView, CreateResearchRun, ResearchProgress,
-    ResearchRunDetail, ResearchRunList,
+    ReportLanguagePreview, ResearchRunDetail, ResearchRunList, PreviewReportLanguage,
 )
 
 
@@ -297,6 +297,20 @@ async def create_research_run(payload: CreateResearchRun, request: Request):
         "id": run.id,
         "status": run.status.value,
         "report_language": run.report_language,
+    }
+
+
+@router.post("/language-preview", response_model=ReportLanguagePreview)
+def preview_report_language(payload: PreviewReportLanguage):
+    report_language, language_source = resolve_report_language(
+        payload.user_request, payload.report_language
+    )
+    profile = language_profile(report_language)
+    return {
+        "tag": profile.tag,
+        "name": profile.name,
+        "quality": profile.quality,
+        "source": language_source,
     }
 
 
