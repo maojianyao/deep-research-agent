@@ -152,7 +152,7 @@ describe("report follow-up DOM", () => {
     await nextTick();
 
     expect(planTab.attributes("aria-selected")).toBe("true");
-    expect(wrapper.find("[data-report-body]").exists()).toBe(false);
+    expect(wrapper.find("[data-report-body]").isVisible()).toBe(false);
     expect(wrapper.find("#dossier-panel-plan").text()).toContain("Question");
   });
 

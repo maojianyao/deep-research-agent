@@ -55,6 +55,7 @@ const props = defineProps({
   language: { type: String, default: "" },
   direction: { type: String, default: "auto" },
   expanded: { type: Boolean, default: true },
+  citationLabels: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits([
   "citation", "selection", "selection-error", "restore-follow-up", "headings", "heading-change",
@@ -64,7 +65,9 @@ const reportContent = ref(null);
 const highlights = ref([]);
 const markers = ref([]);
 
-const html = computed(() => safeMarkdown(props.markdown));
+const html = computed(() => safeMarkdown(props.markdown, {
+  citationLabels: props.citationLabels,
+}));
 const overlayState = computed(() => props.followUps.map((thread) => ({
   id: thread.id,
   anchor: thread.anchor,
@@ -89,6 +92,9 @@ const blockElements = new Set([
 function canonicalNodeText(node) {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || "";
   if (node.nodeName === "BR") return " ";
+  if (node.nodeType === Node.ELEMENT_NODE && node.matches?.(".citation-id")) {
+    return node.dataset.ref || "";
+  }
   const parts = [];
   const block = blockElements.has(node.nodeName);
   if (block) parts.push(" ");
@@ -377,6 +383,19 @@ function scrollToTop() {
   reportBody.value?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function focusCitation(referenceId, occurrenceIndex = 0) {
+  const citations = Array.from(
+    reportContent.value?.querySelectorAll(`.citation-id[data-ref="${referenceId}"]`) || [],
+  );
+  const target = citations[occurrenceIndex] || citations[0];
+  if (!target) return false;
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.add("is-trace-focus");
+  window.setTimeout(() => target.classList.remove("is-trace-focus"), 1600);
+  target.focus();
+  return true;
+}
+
 watch(
   [overlayState, html, () => props.expanded],
   rebuildOverlays,
@@ -400,5 +419,5 @@ onUnmounted(() => {
   window.removeEventListener("scroll", updateActiveHeading, true);
 });
 
-defineExpose({ scrollToHeading, scrollToTop });
+defineExpose({ scrollToHeading, scrollToTop, focusCitation });
 </script>

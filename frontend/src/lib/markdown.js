@@ -56,7 +56,17 @@ marked.use({
   }],
 });
 
-export function safeMarkdown(markdown = "") {
-  const dirty = marked.parse(markdown);
+export function safeMarkdown(markdown = "", { citationLabels = {} } = {}) {
+  let rendered = marked.parse(markdown);
+  rendered = rendered.replace(
+    /<button type="button" class="citation-id" data-ref="([^"]+)">[^<]*<\/button>/g,
+    (button, referenceId) => {
+      const label = citationLabels[referenceId];
+      if (!label) return button;
+      const accessibleLabel = `第 ${label} 条来源：打开证据详情`;
+      return `<button type="button" class="citation-id" data-ref="${referenceId}" aria-label="${accessibleLabel}" title="${accessibleLabel}">${label}</button>`;
+    },
+  );
+  const dirty = rendered;
   return DOMPurify.sanitize(dirty, { USE_PROFILES: { html: true } });
 }

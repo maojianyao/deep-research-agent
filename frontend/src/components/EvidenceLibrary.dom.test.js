@@ -111,4 +111,34 @@ describe("evidence library", () => {
     expect(wrapper.text()).toContain("没有符合当前条件的证据");
     expect(wrapper.find("[data-clear-evidence-filters]").exists()).toBe(true);
   });
+
+  test("traces an evidence card back to every report occurrence", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => payload([evidence("evidence_trace")]),
+    }));
+    const wrapper = mount(EvidenceLibrary, {
+      props: {
+        runId: "run_evidence",
+        citationOccurrences: {
+          evidence_trace: [
+            { index: 0, label: "1" },
+            { index: 1, label: "4" },
+          ],
+        },
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await wrapper.find("[data-evidence-card] button").trigger("click");
+
+    const links = wrapper.findAll("[data-return-to-report]");
+    expect(links.map((link) => link.text())).toEqual(["回到引用 1", "回到引用 4"]);
+    await links[1].trigger("click");
+    expect(wrapper.emitted("return-to-report")?.at(-1)?.[0]).toEqual({
+      evidenceId: "evidence_trace",
+      occurrenceIndex: 1,
+    });
+  });
 });

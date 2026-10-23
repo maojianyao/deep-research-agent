@@ -204,6 +204,7 @@ describe("research workspace overview", () => {
 describe("research run navigation", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/");
+    HTMLElement.prototype.scrollIntoView = vi.fn();
   });
 
   test("directly opening a run URL restores the completed report by default", async () => {
@@ -302,7 +303,7 @@ describe("research run navigation", () => {
 
     await planTab.trigger("click");
     expect(planTab.attributes("aria-selected")).toBe("true");
-    expect(wrapper.find('[role="tabpanel"]').text()).toContain("Question");
+    expect(wrapper.find("#dossier-panel-plan").text()).toContain("Question");
 
     await reportTab.trigger("click");
     await flushPromises();
@@ -312,5 +313,65 @@ describe("research run navigation", () => {
     expect(outline.text()).toContain("Main finding");
     expect(outline.text()).toContain("Limitations");
     expect(wrapper.find("[data-report-back-to-top]").exists()).toBe(true);
+  });
+
+  test("opens the matching evidence and returns to the report citation", async () => {
+    const run = completedRun("run_trace");
+    run.report.markdown = "# Trace report\n\nTrace claim (evidence_trace).";
+    run.evidence = [{
+      id: "evidence_trace",
+      task_id: "task_1",
+      iteration: 1,
+      claim: "Trace evidence claim",
+      excerpt: "Trace source excerpt",
+      locator: "Paragraph 1",
+      verdict: "supported",
+      confidence: 0.9,
+      limitations: [],
+      source: {
+        url: "https://example.com/trace",
+        title: "Trace source",
+        publisher: "Trace publisher",
+        published_at: "2026-01-01",
+        source_type: "official",
+        language: "en",
+      },
+    }];
+    globalThis.fetch = vi.fn(async (url) => {
+      const path = String(url);
+      if (path.includes("/evidence?")) {
+        return response({
+          items: run.evidence,
+          total: 1,
+          page: 1,
+          page_size: 20,
+          facets: { source_types: ["official"], languages: ["en"], verdicts: ["supported"] },
+        });
+      }
+      if (path.endsWith("/follow-ups")) return response({ items: [] });
+      if (path.startsWith("/api/research-runs?")) return listResponse([run]);
+      return response(run);
+    });
+    window.history.replaceState({}, "", "/?run=run_trace");
+
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const citation = wrapper.find('.citation-id[data-ref="evidence_trace"]');
+    expect(citation.text()).toBe("1");
+    await citation.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#dossier-tab-evidence").attributes("aria-selected")).toBe("true");
+    expect(wrapper.find("[data-evidence-detail]").text()).toContain("Trace source excerpt");
+    await wrapper.find("[data-return-to-report]").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#dossier-tab-report").attributes("aria-selected")).toBe("true");
+    expect(wrapper.find("[data-report-body]").isVisible()).toBe(true);
   });
 });

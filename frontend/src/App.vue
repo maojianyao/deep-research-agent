@@ -118,7 +118,7 @@
             <div class="dossier-layout">
               <div class="folio-stack">
                 <section
-                  v-if="activeDossierTab === 'report'"
+                  v-show="activeDossierTab === 'report'"
                   id="dossier-panel-report"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-report"
@@ -149,7 +149,8 @@
                       :language="store.run.report?.language || store.run.report_language"
                       :direction="store.run.report?.direction || store.run.report_direction"
                       :expanded="true"
-                      @citation="showCitation"
+                      :citation-labels="citationContext.labels"
+                      @citation="openCitationTrace"
                       @headings="reportHeadings = $event"
                       @heading-change="activeHeadingId = $event"
                       @selection="openFollowUpSelection"
@@ -160,7 +161,7 @@
                 </section>
 
                 <section
-                  v-else-if="activeDossierTab === 'plan'"
+                  v-if="activeDossierTab === 'plan'"
                   id="dossier-panel-plan"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-plan"
@@ -175,37 +176,42 @@
                 </section>
 
                 <section
-                  v-else-if="activeDossierTab === 'findings'"
+                  v-if="activeDossierTab === 'findings'"
                   id="dossier-panel-findings"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-findings"
                   class="dossier-panel"
                 >
                   <div class="dossier-panel-heading"><h2>综合结论</h2><span>{{ store.run.findings.length }} 条</span></div>
-                  <div class="finding-list"><article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry"><div class="finding-topline"><button class="reference-chip" @click="showCitation(finding.id)">{{ finding.classification }} / {{ finding.id }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div><p class="finding-text">{{ finding.statement }}</p><div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click="showCitation(id)">{{ id }}</button></div></article></div>
+                  <div class="finding-list"><article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry"><div class="finding-topline"><button class="reference-chip" @click="openCitationTrace(finding.id)">{{ finding.classification }} / 引用 {{ citationLabel(finding.id) }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div><p class="finding-text">{{ finding.statement }}</p><div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click="openCitationTrace(id)">[{{ citationLabel(id) }}]</button></div></article></div>
                   <p v-if="!store.run.findings.length" class="empty-note">当前还没有已综合的结论。</p>
                 </section>
 
                 <section
-                  v-else-if="activeDossierTab === 'critiques'"
+                  v-if="activeDossierTab === 'critiques'"
                   id="dossier-panel-critiques"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-critiques"
                   class="dossier-panel"
                 >
                   <div class="dossier-panel-heading"><h2>审稿意见</h2><span>{{ store.run.critiques.length }} 轮</span></div>
-                  <div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="showCitation(issue.finding_id)">{{ issue.finding_id }}</button></p></article></div>
+                  <div class="critique-list"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / {{ issue.problem }} <button v-if="issue.finding_id" class="reference-link" @click="openCitationTrace(issue.finding_id)">[{{ citationLabel(issue.finding_id) }}]</button></p></article></div>
                   <p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p>
                 </section>
 
                 <section
-                  v-else
+                  v-if="activeDossierTab === 'evidence'"
                   id="dossier-panel-evidence"
                   role="tabpanel"
                   aria-labelledby="dossier-tab-evidence"
                   class="dossier-panel"
                 >
-                  <EvidenceLibrary :run-id="store.run.id" :focus-evidence-id="focusedEvidenceId" />
+                  <EvidenceLibrary
+                    :run-id="store.run.id"
+                    :focus-evidence-id="focusedEvidenceId"
+                    :citation-occurrences="citationContext.occurrences"
+                    @return-to-report="returnToReportCitation"
+                  />
                 </section>
               </div>
 
@@ -289,7 +295,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useResearchStore } from "./stores/research";
 import WorkflowDiagram from "./components/WorkflowDiagram.vue";
 import ResearchList from "./components/ResearchList.vue";
@@ -298,6 +304,7 @@ import CitationDialog from "./components/CitationDialog.vue";
 import FollowUpPanel from "./components/FollowUpPanel.vue";
 import CreateResearchDialog from "./components/CreateResearchDialog.vue";
 import EvidenceLibrary from "./components/EvidenceLibrary.vue";
+import { buildCitationContext } from "./lib/citations";
 
 const store = useResearchStore();
 const createDialog = ref(null);
@@ -324,6 +331,9 @@ const toastMessage = ref("");
 const toastError = ref(false);
 let toastTimer;
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
+const citationContext = computed(
+  () => buildCitationContext(store.run?.report?.markdown || ""),
+);
 const dossierTabs = computed(() => [
   { id: "report", label: "研究报告", count: store.run?.report ? "正文" : "未生成" },
   {
@@ -368,6 +378,9 @@ function statusClass(status) {
   if (["planning", "researching", "reviewing_evidence", "synthesizing", "critic_review", "writing"].includes(status)) return "is-progress";
   if (status === "paused") return "is-paused";
   return "is-muted";
+}
+function citationLabel(referenceId) {
+  return citationContext.value.labels[referenceId] || "未引用";
 }
 function notify(message, error = false) {
   toastMessage.value = message;
@@ -480,6 +493,30 @@ async function showCitation(referenceId) {
     findingStatement.value = reference?.finding_statement || "";
   } catch (error) { notify(error.message, true); }
   finally { citationLoading.value = false; }
+}
+
+async function openCitationTrace(referenceId) {
+  let evidenceId = referenceId.startsWith("evidence_") ? referenceId : "";
+  if (!evidenceId) {
+    try {
+      const reference = await store.citation(referenceId);
+      evidenceId = reference?.sources?.[0]?.evidence_id || "";
+    } catch (error) {
+      notify(error.message, true);
+      return;
+    }
+  }
+  if (!evidenceId) {
+    notify("没有找到这条引用对应的证据。", true);
+    return;
+  }
+  focusedEvidenceId.value = evidenceId;
+  activeDossierTab.value = "evidence";
+}
+
+function returnToReportCitation({ evidenceId, occurrenceIndex }) {
+  activeDossierTab.value = "report";
+  nextTick(() => reportView.value?.focusCitation(evidenceId, occurrenceIndex));
 }
 
 function openFollowUpSelection(selection) {

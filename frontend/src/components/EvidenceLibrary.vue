@@ -90,6 +90,19 @@
         <h3>{{ selected.claim }}</h3>
         <p class="evidence-detail-label">原文摘录</p>
         <blockquote>{{ selected.excerpt }}</blockquote>
+        <div v-if="selectedOccurrences.length" class="evidence-return-links">
+          <p class="evidence-detail-label">报告引用位置</p>
+          <button
+            v-for="occurrence in selectedOccurrences"
+            :key="occurrence.index"
+            data-return-to-report
+            type="button"
+            @click="emit('return-to-report', {
+              evidenceId: selected.id,
+              occurrenceIndex: occurrence.index,
+            })"
+          >回到引用 {{ occurrence.label }}</button>
+        </div>
         <dl>
           <div><dt>来源</dt><dd>{{ selected.source.title }}</dd></div>
           <div><dt>发布者</dt><dd>{{ selected.source.publisher || selected.source.source_type }}</dd></div>
@@ -110,8 +123,9 @@ import { api } from "../lib/api";
 const props = defineProps({
   runId: { type: String, required: true },
   focusEvidenceId: { type: String, default: "" },
+  citationOccurrences: { type: Object, default: () => ({}) },
 });
-const emit = defineEmits(["select-evidence"]);
+const emit = defineEmits(["select-evidence", "return-to-report"]);
 const result = reactive({
   items: [],
   total: 0,
@@ -134,6 +148,9 @@ let requestSequence = 0;
 const pageCount = computed(() => Math.max(1, Math.ceil(result.total / result.page_size)));
 const hasFilters = computed(() => Boolean(
   search.value || sourceType.value || language.value || verdict.value || minConfidence.value,
+));
+const selectedOccurrences = computed(() => (
+  props.citationOccurrences[selected.value?.id] || []
 ));
 
 const languageNames = {
