@@ -140,6 +140,61 @@ describe("report follow-up DOM", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  test("research report collapses and expands from its summary like the research plan", async () => {
+    const { wrapper } = mountCompletedReport();
+    const section = wrapper.find("[data-report-section]");
+
+    expect(section.exists()).toBe(true);
+    expect(section.element.open).toBe(false);
+    expect(section.find("summary").text()).toContain("研究报告");
+    expect(section.find("summary").text()).toContain("引用编号可点击查看来源");
+
+    section.find("summary").element.click();
+    await section.trigger("toggle");
+    await nextTick();
+
+    expect(section.element.open).toBe(true);
+    expect(wrapper.findComponent(ReportView).props("expanded")).toBe(true);
+    expect(wrapper.find("[data-report-body]").exists()).toBe(true);
+  });
+
+  test("collapsing the research report clears a pending passage selection", async () => {
+    const { wrapper } = mountCompletedReport();
+    const section = wrapper.find("[data-report-section]");
+    section.find("summary").element.click();
+    await section.trigger("toggle");
+    await nextTick();
+
+    const body = wrapper.find("[data-report-body]");
+    selectNode(body.element.querySelector("p"));
+    await body.trigger("mouseup");
+    await nextTick();
+    expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(true);
+
+    section.element.open = false;
+    await section.trigger("toggle");
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(false);
+    expect(window.getSelection()?.isCollapsed).toBe(true);
+  });
+
+  test("opening another research run collapses the previous report", async () => {
+    const { wrapper, store } = mountCompletedReport();
+    const section = wrapper.find("[data-report-section]");
+
+    section.find("summary").element.click();
+    await section.trigger("toggle");
+    await nextTick();
+    expect(section.element.open).toBe(true);
+
+    store.runId = "run_other";
+    await nextTick();
+
+    expect(section.element.open).toBe(false);
+    expect(wrapper.findComponent(ReportView).props("expanded")).toBe(false);
+  });
+
   test("citation controls and selections outside the report do not reveal 提问", async () => {
     const { wrapper } = mountCompletedReport();
     const citation = wrapper.find(".citation-id");

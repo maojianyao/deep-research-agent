@@ -50,6 +50,7 @@ const props = defineProps({
   active: Boolean,
   eligible: Boolean,
   followUps: { type: Array, default: () => [] },
+  expanded: { type: Boolean, default: true },
 });
 const emit = defineEmits(["citation", "selection", "selection-error", "restore-follow-up"]);
 const reportBody = ref(null);
@@ -329,7 +330,7 @@ function scheduleOverlays() {
 }
 
 watch(
-  [overlayState, html],
+  [overlayState, html, () => props.expanded],
   rebuildOverlays,
   { deep: true, immediate: true, flush: "post" },
 );

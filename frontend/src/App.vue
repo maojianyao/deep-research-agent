@@ -60,10 +60,10 @@
 
             <div class="mt-6 grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_290px]">
               <div class="grid min-w-0 gap-4">
-                <section class="rounded-md border border-slate-200 bg-white">
-                  <div class="flex items-center justify-between border-b border-slate-100 px-4 py-3"><h2 class="text-xs font-semibold">研究报告</h2><span class="text-[10px] text-slate-400">引用编号可点击查看来源</span></div>
-                  <div class="p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" :follow-ups="store.followUps" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" @restore-follow-up="restoreFollowUp" /></div>
-                </section>
+                <details data-report-section :open="reportOpen" class="overflow-hidden rounded-md border border-slate-200 bg-white" @toggle="handleReportToggle">
+                  <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 marker:hidden hover:bg-slate-50"><h2 class="text-xs font-semibold">研究报告</h2><span class="flex items-center gap-2 text-[10px] text-slate-400">引用编号可点击查看来源 <span class="fold-chevron">⌄</span></span></summary>
+                  <div class="border-t border-slate-100 p-4"><ReportView :markdown="store.run.report?.markdown || ''" :active="store.isActive" :eligible="store.run.status === 'completed' && Boolean(store.run.report)" :follow-ups="store.followUps" :expanded="reportOpen" @citation="showCitation" @selection="openFollowUpSelection" @selection-error="notify($event, true)" @restore-follow-up="restoreFollowUp" /></div>
+                </details>
 
                 <details class="overflow-hidden rounded-md border border-slate-200 bg-white">
                   <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 marker:hidden hover:bg-slate-50"><h2 class="text-xs font-semibold">研究计划</h2><span class="flex items-center gap-2 text-[10px] text-slate-400">{{ completedTasks }} / {{ store.run.plan?.tasks?.length || 0 }} 项完成 <span class="fold-chevron">⌄</span></span></summary>
@@ -148,7 +148,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useResearchStore } from "./stores/research";
 import WorkflowDiagram from "./components/WorkflowDiagram.vue";
 import ResearchList from "./components/ResearchList.vue";
@@ -169,6 +169,7 @@ const followUpError = ref("");
 const windowWidth = ref(window.innerWidth);
 const windowHeight = ref(window.innerHeight);
 const topic = ref("");
+const reportOpen = ref(false);
 const iterations = ref(3);
 const creating = ref(false);
 const toastMessage = ref("");
@@ -280,6 +281,19 @@ function openFollowUpSelection(selection) {
   if (store.selectedFollowUp) store.connectFollowUpStream(store.selectedFollowUp);
 }
 
+function clearReportInteraction() {
+  pendingFollowUp.value = null;
+  followUpOpen.value = false;
+  followUpError.value = "";
+  window.getSelection()?.removeAllRanges();
+}
+
+function handleReportToggle(event) {
+  reportOpen.value = event.currentTarget.open;
+  if (reportOpen.value) return;
+  clearReportInteraction();
+}
+
 async function restoreFollowUp(threadId) {
   pendingFollowUp.value = null;
   followUpOpen.value = false;
@@ -370,6 +384,11 @@ function updateViewport() {
   windowWidth.value = window.innerWidth;
   windowHeight.value = window.innerHeight;
 }
+
+watch(() => store.runId, () => {
+  reportOpen.value = false;
+  clearReportInteraction();
+});
 
 onMounted(() => {
   store.loadRuns();
