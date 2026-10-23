@@ -23,7 +23,8 @@
           maxlength="2000"
           required
           class="dialog-input dialog-topic"
-          aria-describedby="topic-help"
+          :aria-invalid="hasFormError"
+          :aria-describedby="topicDescription"
           placeholder="例如：评估某项政策对中小企业创新投入的影响，重点关注实施机制、效果证据与地区差异。"
         ></textarea>
         <div id="topic-help" class="dialog-help flex justify-between gap-4">
@@ -82,7 +83,13 @@
           </select>
         </details>
 
-        <p v-if="error" data-form-error class="form-error" role="alert">{{ error }}</p>
+        <p
+          v-if="hasFormError"
+          id="create-research-error"
+          data-form-error
+          class="form-error"
+          role="alert"
+        >{{ validationError || error }}</p>
       </div>
 
       <footer data-dialog-actions class="dialog-actions">
@@ -99,7 +106,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import { api } from "../lib/api";
 
-defineProps({
+const props = defineProps({
   creating: Boolean,
   error: { type: String, default: "" },
 });
@@ -132,6 +139,7 @@ const customIterations = ref(3);
 const previewLoading = ref(false);
 const previewError = ref("");
 const languagePreview = ref(null);
+const validationError = ref("");
 let previewTimer;
 let previewRequest = 0;
 let previewAbort;
@@ -140,6 +148,10 @@ const iterations = computed(() => {
   if (useCustomRounds.value) return customIterations.value;
   return presets.find((preset) => preset.id === depth.value)?.iterations || 3;
 });
+const hasFormError = computed(() => Boolean(validationError.value || props.error));
+const topicDescription = computed(() => (
+  hasFormError.value ? "topic-help create-research-error" : "topic-help"
+));
 const languageSourceLabel = computed(() => ({
   detected: "跟随研究请求",
   explicit: "由你手动选择",
@@ -164,6 +176,7 @@ function reset() {
   customIterations.value = 3;
   languagePreview.value = null;
   previewError.value = "";
+  validationError.value = "";
 }
 
 async function refreshLanguagePreview() {
@@ -198,15 +211,17 @@ async function refreshLanguagePreview() {
 }
 
 function scheduleLanguagePreview() {
+  validationError.value = "";
   clearTimeout(previewTimer);
   previewTimer = setTimeout(refreshLanguagePreview, 250);
 }
 
 function submit() {
   if (!topic.value.trim()) {
-    previewError.value = "请先填写研究主题或问题。";
+    validationError.value = "请先填写研究主题或问题。";
     return;
   }
+  validationError.value = "";
   emit("create", {
     topic: topic.value.trim(),
     iterations: iterations.value,

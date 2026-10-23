@@ -409,6 +409,22 @@ function focusReport() {
   reportBody.value?.focus();
 }
 
+function focusAnchor(anchor) {
+  const root = reportContent.value;
+  if (!root || !anchor) return false;
+  const range = rangeForAnchor(root, textNodes(root), anchor);
+  if (!range) return false;
+  reportBody.value?.focus();
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  range.startContainer.parentElement?.scrollIntoView?.({
+    behavior: "smooth",
+    block: "center",
+  });
+  return true;
+}
+
 watch(
   [overlayState, html, () => props.expanded],
   rebuildOverlays,
@@ -435,5 +451,5 @@ onUnmounted(() => {
   clearTimeout(selectionTimer);
 });
 
-defineExpose({ scrollToHeading, scrollToTop, focusCitation, focusReport });
+defineExpose({ scrollToHeading, scrollToTop, focusCitation, focusReport, focusAnchor });
 </script>

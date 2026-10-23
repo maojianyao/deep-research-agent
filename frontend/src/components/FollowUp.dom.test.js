@@ -245,6 +245,23 @@ describe("report follow-up DOM", () => {
     expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(true);
   });
 
+  test("closing an unsaved conversation restores the report selection and focus", async () => {
+    const { wrapper } = mountCompletedReport();
+    const body = wrapper.find("[data-report-body]");
+    const paragraph = body.element.querySelector("p");
+    selectNode(paragraph);
+    await body.trigger("mouseup");
+    await wrapper.find("[data-follow-up-trigger]").trigger("click");
+
+    window.getSelection()?.removeAllRanges();
+    await wrapper.find('[data-follow-up-panel] [aria-label="最小化追问"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(false);
+    expect(document.activeElement).toBe(body.element);
+    expect(window.getSelection()?.toString()).toContain("Summary text with key evidence");
+  });
+
   test("desktop and narrow conversations expose semantic floating and bottom-sheet layouts", async () => {
     const thread = {
       id: "followup_layout",

@@ -43,6 +43,7 @@ describe("research stage panel", () => {
     expect(wrapper.text()).toContain("已完成 1 / 2 项研究任务");
     expect(wrapper.text()).toContain("审稿要求补充检索");
     expect(wrapper.text()).not.toContain("%");
+    expect(wrapper.find("[data-supplemental-round]").exists()).toBe(true);
     expect(wrapper.findAll("[data-stage-state='complete']")).toHaveLength(2);
   });
 
@@ -87,5 +88,6 @@ describe("research stage panel", () => {
     expect(wrapper.findAll("[data-stage-state='complete']")).toHaveLength(6);
     expect(wrapper.text()).toContain("报告已完成");
     expect(wrapper.text()).toContain("查看或下载报告");
+    expect(wrapper.find("[data-supplemental-round]").exists()).toBe(false);
   });
 });

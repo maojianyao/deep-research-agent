@@ -184,8 +184,14 @@
                 >
                   <div class="dossier-panel-heading"><h2>综合结论</h2><span>{{ store.run.findings.length }} 条</span></div>
                   <div class="finding-list" @click="handleInlineCitation">
-                    <article v-for="finding in store.run.findings" :key="finding.id" class="finding-entry">
-                      <div class="finding-topline"><button class="reference-chip" @click.stop="openCitationTrace(finding.id)">{{ finding.classification }} / 引用 {{ citationLabel(finding.id) }}</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div>
+                    <article
+                      v-for="finding in store.run.findings"
+                      :key="finding.id"
+                      :data-citation-item="finding.id"
+                      tabindex="-1"
+                      class="finding-entry"
+                    >
+                      <div class="finding-topline"><button class="reference-chip" @click.stop="openCitationTrace(finding.id)">{{ finding.classification }} / 查看关联证据</button><span class="text-[11px] text-[var(--muted)]">置信度 {{ Math.round(finding.confidence * 100) }}%</span></div>
                       <div class="finding-text" v-html="renderCitedMarkdown(finding.statement)"></div>
                       <div class="reference-row"><button v-for="id in finding.evidence_ids" :key="id" class="reference-link" @click.stop="openCitationTrace(id)">[{{ citationLabel(id) }}]</button></div>
                     </article>
@@ -201,7 +207,7 @@
                   class="dossier-panel"
                 >
                   <div class="dossier-panel-heading"><h2>审稿意见</h2><span>{{ store.run.critiques.length }} 轮</span></div>
-                  <div class="critique-list" @click="handleInlineCitation"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" class="critique-issue"><strong>{{ issue.severity }}</strong> / <span v-html="renderCitedMarkdown(issue.problem)"></span> <button v-if="issue.finding_id" class="reference-link" @click.stop="openCitationTrace(issue.finding_id)">[{{ citationLabel(issue.finding_id) }}]</button></p></article></div>
+                  <div class="critique-list" @click="handleInlineCitation"><article v-for="review in store.run.critiques" :key="review.iteration" class="critique-entry"><div class="critique-head"><span class="status-pill" :class="review.decision === 'approve' ? 'is-complete' : 'is-progress'">{{ review.decision === 'approve' ? '通过' : review.decision === 'research_more' ? '要求补证' : '人工复核' }}</span><span class="text-[11px] text-[var(--muted)]">第 {{ review.iteration }} 轮</span></div><p v-for="(issue,index) in review.issues" :key="index" :data-citation-item="critiqueItemId(review, index)" tabindex="-1" class="critique-issue"><strong>{{ issue.severity }}</strong> / <span v-html="renderCitedMarkdown(issue.problem)"></span> <button v-if="issue.finding_id" class="reference-link" @click.stop="openCitationTrace(issue.finding_id)">[{{ citationLabel(issue.finding_id) }}]</button></p></article></div>
                   <p v-if="!store.run.critiques.length" class="empty-note">研究审稿后会在此显示意见。</p>
                 </section>
 
@@ -335,6 +341,22 @@ const toastMessage = ref("");
 const toastError = ref(false);
 let toastTimer;
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
+const citationSections = computed(() => [
+  ...(store.run?.findings || []).map((finding) => ({
+    source: "findings",
+    itemId: finding.id,
+    referenceId: finding.id,
+    markdown: finding.statement || "",
+  })),
+  ...(store.run?.critiques || []).flatMap((review) => (
+    (review.issues || []).map((issue, index) => ({
+      source: "critiques",
+      itemId: critiqueItemId(review, index),
+      referenceId: issue.finding_id || "",
+      markdown: issue.problem || "",
+    }))
+  )),
+]);
 const citationContext = computed(
   () => buildCitationContext(
     store.run?.report?.markdown || "",
@@ -342,6 +364,7 @@ const citationContext = computed(
       ...(store.run?.evidence || []).map((item) => item.id),
       ...(store.run?.findings || []).map((item) => item.id),
     ],
+    citationSections.value,
   ),
 );
 const dossierTabs = computed(() => [
@@ -384,6 +407,9 @@ function statusClass(status) {
 }
 function citationLabel(referenceId) {
   return citationContext.value.labels[referenceId] || "未引用";
+}
+function critiqueItemId(review, index) {
+  return `critique-${review.iteration}-${index}`;
 }
 function renderCitedMarkdown(value) {
   return safeMarkdown(value || "", { citationLabels: citationContext.value.labels });
@@ -524,9 +550,31 @@ async function openCitationTrace(referenceId) {
   activeDossierTab.value = "evidence";
 }
 
-function returnToReportCitation({ evidenceId, occurrenceIndex }) {
-  activeDossierTab.value = "report";
-  nextTick(() => reportView.value?.focusCitation(evidenceId, occurrenceIndex));
+async function returnToReportCitation({ evidenceId, occurrenceIndex }) {
+  const occurrence = citationContext.value.occurrences[evidenceId]?.[occurrenceIndex];
+  const source = occurrence?.source || "report";
+  activeDossierTab.value = source;
+  await nextTick();
+  if (source === "report") {
+    reportView.value?.focusCitation(
+      evidenceId,
+      Math.max(0, occurrence?.itemIndex ?? occurrenceIndex),
+    );
+    return;
+  }
+  focusDossierCitation(evidenceId, occurrence);
+}
+function focusDossierCitation(referenceId, occurrence) {
+  const item = Array.from(document.querySelectorAll("[data-citation-item]")).find(
+    (candidate) => candidate.dataset.citationItem === occurrence?.itemId,
+  );
+  if (!item) return;
+  const citations = Array.from(item.querySelectorAll(".citation-id")).filter(
+    (citation) => citation.dataset.ref === referenceId,
+  );
+  const target = citations[occurrence?.itemIndex || 0] || item;
+  target.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  target.focus();
 }
 
 function openFollowUpSelection(selection) {
@@ -639,6 +687,7 @@ async function deleteFollowUp() {
 async function closeFollowUp() {
   const threadId = store.selectedFollowUp?.id || "";
   const hadPersistedThread = Boolean(store.selectedFollowUp);
+  const selectionAnchor = pendingFollowUp.value?.anchor || store.selectedFollowUp?.anchor;
   if (hadPersistedThread) {
     try {
       await store.minimizeFollowUp();
@@ -657,7 +706,7 @@ async function closeFollowUp() {
     ? document.querySelector(`[data-follow-up-marker][data-thread-id="${threadId}"]`)
     : null;
   if (marker) marker.focus();
-  else reportView.value?.focusReport();
+  else if (!reportView.value?.focusAnchor(selectionAnchor)) reportView.value?.focusReport();
 }
 
 function updateViewport() {

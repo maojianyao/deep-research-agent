@@ -90,5 +90,15 @@ describe("create research request", () => {
     expect(wrapper.find("#topic").attributes("required")).toBeDefined();
     expect(wrapper.find("#topic").attributes("aria-describedby")).toContain("topic-help");
     expect(wrapper.find("[data-form-error]").exists()).toBe(false);
+
+    await wrapper.find("form").trigger("submit");
+
+    const error = wrapper.find("[data-form-error]");
+    expect(error.exists()).toBe(true);
+    expect(error.attributes("id")).toBe("create-research-error");
+    expect(wrapper.find("#topic").attributes("aria-invalid")).toBe("true");
+    expect(wrapper.find("#topic").attributes("aria-describedby")).toContain(
+      "create-research-error",
+    );
   });
 });

@@ -141,4 +141,38 @@ describe("evidence library", () => {
       occurrenceIndex: 1,
     });
   });
+
+  test("opens a focused citation even when it is outside the first results page", async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      const path = String(url);
+      if (path.endsWith("/evidence/evidence_page_two")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => evidence("evidence_page_two"),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => payload([evidence("evidence_page_one")]),
+      };
+    });
+    const wrapper = mount(EvidenceLibrary, {
+      props: {
+        runId: "run_evidence",
+        focusEvidenceId: "evidence_page_two",
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(wrapper.find("[data-evidence-detail]").text()).toContain(
+      "Exact source excerpt evidence_page_two",
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/research-runs/run_evidence/evidence/evidence_page_two",
+      expect.any(Object),
+    );
+  });
 });

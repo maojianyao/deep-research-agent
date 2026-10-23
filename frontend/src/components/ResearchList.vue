@@ -49,7 +49,7 @@
           <tr>
             <th>研究主题</th>
             <th>状态</th>
-            <th>进度</th>
+            <th>研究轮次</th>
             <th>更新时间</th>
             <th class="text-right">操作</th>
           </tr>
@@ -69,9 +69,9 @@
               <span class="topic-language">{{ run.report_language_name }} / {{ run.report_language }}</span>
             </td>
             <td data-label="状态"><span class="status-pill" :class="statusTone(run.status)">{{ statusText(run.status) }}</span></td>
-            <td data-label="进度" class="w-40">
-              <div class="table-progress-label"><span>第 {{ run.iteration }} / {{ run.max_iterations }} 轮</span><span>{{ progress(run) }}%</span></div>
-              <div class="table-progress"><span :style="{ width: `${progress(run)}%` }"></span></div>
+            <td data-label="研究轮次" class="w-40">
+              <span class="round-count">第 {{ run.iteration }} / {{ run.max_iterations }} 轮</span>
+              <small class="round-note">{{ roundNote(run) }}</small>
             </td>
             <td data-label="更新时间" class="whitespace-nowrap">{{ dateText(run.updated_at) }}</td>
             <td data-label="操作">
@@ -150,6 +150,6 @@ const statusTone = (status) => {
   if (status === "paused") return "is-paused";
   return "is-muted";
 };
-const progress = (run) => run.status === "completed" ? 100 : Math.min(94, Math.round(run.iteration / Math.max(1, run.max_iterations) * 100));
+const roundNote = (run) => run.status === "completed" ? "报告已形成" : "轮次上限";
 const dateText = (value) => value ? new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 </script>

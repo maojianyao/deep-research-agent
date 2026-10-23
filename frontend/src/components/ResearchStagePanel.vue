@@ -7,7 +7,9 @@
     <div class="stage-current">
       <span>当前阶段</span>
       <strong data-current-stage>{{ currentStage.label }}</strong>
-      <small v-if="supplementalRound">第 {{ run.iteration }} 轮补证</small>
+      <small v-if="supplementalRound" data-supplemental-round class="stage-supplemental">
+        第 {{ run.iteration }} 轮补证
+      </small>
     </div>
     <ol class="stage-list" aria-label="研究阶段">
       <li
@@ -26,7 +28,7 @@
       <div><dt>最近更新</dt><dd>{{ formatDate(run.updated_at) }}</dd></div>
     </dl>
     <div v-if="latestEvent" class="stage-latest">
-      <span>最近动态</span>
+      <span>{{ currentWorkLabel }}</span>
       <p>{{ latestEvent.message }}</p>
     </div>
     <p class="stage-next">{{ nextAction }}</p>
@@ -80,13 +82,19 @@ const currentStage = computed(() => definitions[
   Math.min(activeIndex.value, definitions.length - 1)
 ]);
 const supplementalRound = computed(() => (
-  (props.run.events || []).some((event) => /补证|补充检索/.test(event.message))
+  !["completed", "failed", "needs_human_review", "cancelled"].includes(props.run.status)
+  && (props.run.events || []).some((event) => /补证|补充检索/.test(event.message))
 ));
 const totalTasks = computed(() => props.run.plan?.tasks?.length || 0);
 const completedTasks = computed(
   () => props.run.plan?.tasks?.filter((task) => task.completed).length || 0,
 );
 const latestEvent = computed(() => [...(props.run.events || [])].at(-1) || null);
+const currentWorkLabel = computed(() => (
+  ["paused", "failed", "needs_human_review", "cancelled", "completed"].includes(
+    props.run.status,
+  ) ? "最近动态" : "当前工作"
+));
 const stages = computed(() => definitions.map((stage, index) => {
   let state = "pending";
   if (allComplete.value || index < activeIndex.value) state = "complete";

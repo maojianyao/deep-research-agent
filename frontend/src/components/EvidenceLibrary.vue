@@ -90,22 +90,23 @@
         <h3>{{ selected.claim }}</h3>
         <p class="evidence-detail-label">原文摘录</p>
         <blockquote>{{ selected.excerpt }}</blockquote>
-        <div v-if="selectedOccurrences.length" class="evidence-return-links">
-          <p class="evidence-detail-label">报告引用位置</p>
+        <div v-if="returnTargets.length" class="evidence-return-links">
+          <p class="evidence-detail-label">引用了这条证据的位置</p>
           <button
-            v-for="occurrence in selectedOccurrences"
-            :key="occurrence.index"
+            v-for="target in returnTargets"
+            :key="`${target.referenceId}-${target.occurrenceIndex}`"
             data-return-to-report
             type="button"
             @click="emit('return-to-report', {
-              evidenceId: selected.id,
-              occurrenceIndex: occurrence.index,
+              evidenceId: target.referenceId,
+              occurrenceIndex: target.occurrenceIndex,
             })"
-          >回到引用 {{ occurrence.label }}</button>
+          >{{ returnLabel(target) }}</button>
         </div>
         <dl>
           <div><dt>来源</dt><dd>{{ selected.source.title }}</dd></div>
           <div><dt>发布者</dt><dd>{{ selected.source.publisher || selected.source.source_type }}</dd></div>
+          <div><dt>发布日期</dt><dd>{{ selected.source.published_at || "未提供" }}</dd></div>
           <div><dt>语言</dt><dd>{{ languageLabel(selected.source.language) }}</dd></div>
           <div><dt>定位</dt><dd>{{ selected.locator || "未提供" }}</dd></div>
           <div><dt>置信度</dt><dd>{{ Math.round(selected.confidence * 100) }}%</dd></div>
@@ -152,6 +153,26 @@ const hasFilters = computed(() => Boolean(
 const selectedOccurrences = computed(() => (
   props.citationOccurrences[selected.value?.id] || []
 ));
+const returnTargets = computed(() => {
+  const targets = selectedOccurrences.value.map((occurrence) => ({
+    ...occurrence,
+    referenceId: selected.value.id,
+    occurrenceIndex: occurrence.index,
+  }));
+  for (const findingId of selected.value?.finding_ids || []) {
+    (props.citationOccurrences[findingId] || []).forEach((occurrence, occurrenceIndex) => {
+      if (["findings", "critiques"].includes(occurrence.source)) {
+        targets.push({ ...occurrence, referenceId: findingId, occurrenceIndex });
+      }
+    });
+  }
+  return targets.filter((target, index) => (
+    targets.findIndex((candidate) => (
+      candidate.referenceId === target.referenceId
+      && candidate.occurrenceIndex === target.occurrenceIndex
+    )) === index
+  ));
+});
 
 const languageNames = {
   en: "English",
@@ -171,6 +192,11 @@ const verdictLabel = (value) => ({
   partially_supported: "部分支持",
   unsupported: "未支持",
 }[value] || value);
+const returnLabel = (target) => ({
+  report: `回到引用 ${target.label}`,
+  findings: "回到综合结论",
+  critiques: "回到审稿意见",
+}[target.source] || `回到引用 ${target.label}`);
 
 async function load() {
   const sequence = ++requestSequence;
@@ -197,6 +223,22 @@ async function load() {
     if (sequence === requestSequence) error.value = requestError.message;
   } finally {
     if (sequence === requestSequence) loading.value = false;
+  }
+}
+
+async function loadFocusedEvidence(id) {
+  const sequence = ++requestSequence;
+  error.value = "";
+  try {
+    const item = await api(
+      `/research-runs/${encodeURIComponent(props.runId)}/evidence/${encodeURIComponent(id)}`,
+    );
+    if (sequence === requestSequence) selected.value = item;
+  } catch (requestError) {
+    if (sequence === requestSequence) {
+      selected.value = null;
+      error.value = requestError.message;
+    }
   }
 }
 
@@ -233,9 +275,8 @@ watch(() => props.focusEvidenceId, async (id) => {
     selected.value = current;
     return;
   }
-  page.value = 1;
-  await load();
-});
+  await loadFocusedEvidence(id);
+}, { immediate: true });
 watch(selected, (item) => {
   if (item) emit("select-evidence", item.id);
 });

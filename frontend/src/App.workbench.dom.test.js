@@ -193,6 +193,8 @@ describe("research workspace overview", () => {
     expect(rows[0].text()).toContain("下载");
     expect(rows[1].text()).toContain("结束任务");
     expect(rows[2].text()).toContain("查看待复核");
+    expect(rows[1].text()).toContain("第 1 / 3 轮");
+    expect(rows[1].text()).not.toContain("%");
 
     await wrapper.find('select[aria-label="研究档案排序"]').setValue("updated_asc");
     await flushPromises();
@@ -339,6 +341,9 @@ describe("research run navigation", () => {
     }];
     globalThis.fetch = vi.fn(async (url) => {
       const path = String(url);
+      if (path.endsWith("/evidence/evidence_trace")) {
+        return response(run.evidence[0]);
+      }
       if (path.includes("/evidence?")) {
         return response({
           items: run.evidence,
@@ -406,7 +411,24 @@ describe("research run navigation", () => {
       caveats: [],
       evidence_ids: ["evidence_finding_trace"],
     }];
-    globalThis.fetch = routeFetch([run]);
+    globalThis.fetch = vi.fn(async (url) => {
+      const path = String(url);
+      if (path.endsWith("/evidence/evidence_finding_trace")) {
+        return response({ ...run.evidence[0], finding_ids: ["finding_trace"] });
+      }
+      if (path.includes("/evidence?")) {
+        return response({
+          items: run.evidence,
+          total: 1,
+          page: 1,
+          page_size: 20,
+          facets: { source_types: ["official"], languages: ["en"], verdicts: ["supported"] },
+        });
+      }
+      if (path.endsWith("/follow-ups")) return response({ items: [] });
+      if (path.startsWith("/api/research-runs?")) return listResponse([run]);
+      return response(run);
+    });
     window.history.replaceState({}, "", "/?run=run_findings_trace");
     const wrapper = mount(App, {
       attachTo: document.body,
@@ -419,7 +441,109 @@ describe("research run navigation", () => {
     const finding = wrapper.find(".finding-text");
     expect(finding.text()).not.toContain("evidence_finding_trace");
     expect(finding.find('.citation-id[data-ref="evidence_finding_trace"]').text()).toBe("1");
-    expect(wrapper.find(".reference-chip").text()).toContain("引用");
-    expect(wrapper.find(".reference-chip").text()).not.toContain("finding_trace");
+    await finding.find('.citation-id[data-ref="evidence_finding_trace"]').trigger("click");
+    await flushPromises();
+
+    const backToConclusion = wrapper.findAll("[data-return-to-report]").find(
+      (button) => button.text().includes("综合结论"),
+    );
+    expect(backToConclusion).toBeTruthy();
+    await backToConclusion.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#dossier-tab-findings").attributes("aria-selected")).toBe("true");
+    expect(document.activeElement?.closest("[data-citation-item]")?.dataset.citationItem)
+      .toBe("finding_trace");
+  });
+
+  test("links one evidence item back to findings and review notes", async () => {
+    const run = completedRun("run_review_trace");
+    run.report.markdown = "# Report\n\nNo report citation.";
+    run.evidence = [{
+      id: "evidence_review_trace",
+      task_id: "task_1",
+      iteration: 1,
+      claim: "Review evidence",
+      excerpt: "Review excerpt",
+      verdict: "partially_supported",
+      confidence: 0.8,
+      limitations: [],
+      source: {
+        url: "https://example.com/review",
+        title: "Review source",
+        publisher: "Publisher",
+        published_at: "2026-02-01",
+        source_type: "academic",
+        language: "en",
+      },
+    }];
+    run.findings = [{
+      id: "finding_review_trace",
+      task_id: "task_1",
+      iteration: 1,
+      statement: "Supported point (evidence_review_trace).",
+      classification: "fact",
+      confidence: 0.8,
+      caveats: [],
+      evidence_ids: ["evidence_review_trace"],
+    }];
+    run.critiques = [{
+      iteration: 1,
+      decision: "research_more",
+      approved_finding_ids: [],
+      issues: [{
+        severity: "major",
+        finding_id: "finding_review_trace",
+        problem: "The review needs stronger support (evidence_review_trace).",
+        follow_up_questions: [],
+        follow_up_queries: [],
+      }],
+    }];
+    globalThis.fetch = vi.fn(async (url) => {
+      const path = String(url);
+      if (path.endsWith("/evidence/evidence_review_trace")) {
+        return response({
+          ...run.evidence[0],
+          finding_ids: ["finding_review_trace"],
+        });
+      }
+      if (path.includes("/evidence?")) {
+        return response({
+          items: run.evidence,
+          total: 1,
+          page: 1,
+          page_size: 20,
+          facets: { source_types: ["academic"], languages: ["en"], verdicts: ["partially_supported"] },
+        });
+      }
+      if (path.endsWith("/follow-ups")) return response({ items: [] });
+      if (path.startsWith("/api/research-runs?")) return listResponse([run]);
+      return response(run);
+    });
+    window.history.replaceState({}, "", "/?run=run_review_trace");
+    const wrapper = mount(App, {
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    await wrapper.find("#dossier-tab-critiques").trigger("click");
+    await wrapper.find("#dossier-panel-critiques .citation-id").trigger("click");
+    await flushPromises();
+
+    const returnButtons = wrapper.findAll("[data-return-to-report]");
+    expect(returnButtons.map((button) => button.text())).toEqual(
+      expect.arrayContaining(["回到综合结论", "回到审稿意见"]),
+    );
+    const backToReview = returnButtons.find(
+      (button) => button.text() === "回到审稿意见",
+    );
+    await backToReview.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("#dossier-tab-critiques").attributes("aria-selected")).toBe("true");
+    expect(document.activeElement?.closest("[data-citation-item]")?.dataset.citationItem)
+      .toBe("critique-1-0");
   });
 });

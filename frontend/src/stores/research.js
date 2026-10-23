@@ -11,6 +11,7 @@ export const useResearchStore = defineStore("research", {
     summary: { total: 0, active: 0, completed: 0, needs_human_review: 0 },
     runId: null, run: null, eventSequence: 0, eventSource: null, pollTimer: null,
     listTimer: null, connection: "connecting", loading: false, error: "",
+    listRequestSequence: 0,
     followUps: [], selectedFollowUpId: null,
     followUpEventSource: null, followUpReconnectTimer: null, followUpStreamThreadId: null,
   }),
@@ -28,6 +29,7 @@ export const useResearchStore = defineStore("research", {
   },
   actions: {
     async loadRuns() {
+      const sequence = ++this.listRequestSequence;
       this.loading = true;
       const params = new URLSearchParams({ page: this.page, page_size: this.pageSize });
       if (this.statusFilter) params.set("status", this.statusFilter);
@@ -35,6 +37,7 @@ export const useResearchStore = defineStore("research", {
       params.set("sort", this.sort);
       try {
         const data = await api(`/research-runs?${params}`);
+        if (sequence !== this.listRequestSequence) return;
         this.runs = data.items;
         this.total = data.total;
         this.summary = data.summary || this.summary;
@@ -42,9 +45,12 @@ export const useResearchStore = defineStore("research", {
         this.error = "";
         if (this.page > this.pageCount) { this.page = this.pageCount; return this.loadRuns(); }
       } catch (error) {
+        if (sequence !== this.listRequestSequence) return;
         this.connection = "offline";
         this.error = error.message;
-      } finally { this.loading = false; }
+      } finally {
+        if (sequence === this.listRequestSequence) this.loading = false;
+      }
     },
     setSearch(value) {
       this.search = value;
