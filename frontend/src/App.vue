@@ -578,6 +578,7 @@ function focusDossierCitation(referenceId, occurrence) {
 }
 
 function openFollowUpSelection(selection) {
+  if (!selection && followUpOpen.value && pendingFollowUp.value) return;
   pendingFollowUp.value = selection;
   followUpOpen.value = false;
   followUpError.value = "";

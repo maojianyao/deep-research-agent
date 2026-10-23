@@ -245,6 +245,27 @@ describe("report follow-up DOM", () => {
     expect(wrapper.find("[data-follow-up-trigger]").exists()).toBe(true);
   });
 
+  test("opening the question panel survives focus-related selection changes", async () => {
+    vi.useFakeTimers();
+    const { wrapper } = mountCompletedReport();
+    const body = wrapper.find("[data-report-body]");
+    selectNode(body.element.querySelector("p"));
+    document.dispatchEvent(new Event("selectionchange"));
+    await vi.advanceTimersByTimeAsync(100);
+    await nextTick();
+
+    await wrapper.find("[data-follow-up-trigger]").trigger("click");
+    await nextTick();
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(true);
+
+    window.getSelection().removeAllRanges();
+    document.dispatchEvent(new Event("selectionchange"));
+    await vi.advanceTimersByTimeAsync(100);
+    await nextTick();
+
+    expect(wrapper.find("[data-follow-up-panel]").exists()).toBe(true);
+  });
+
   test("closing an unsaved conversation restores the report selection and focus", async () => {
     const { wrapper } = mountCompletedReport();
     const body = wrapper.find("[data-report-body]");
