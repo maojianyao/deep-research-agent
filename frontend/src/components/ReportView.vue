@@ -356,9 +356,10 @@ function refreshHeadings() {
     emit("headings", []);
     return;
   }
-  const items = Array.from(content.querySelectorAll("h1, h2, h3")).map((heading, index) => {
+  const items = Array.from(content.querySelectorAll("h1, h2, h3, h4")).map((heading, index) => {
     const id = `report-heading-${index + 1}`;
     heading.id = id;
+    heading.tabIndex = -1;
     return {
       id,
       level: Number(heading.tagName.slice(1)),
@@ -372,7 +373,7 @@ function refreshHeadings() {
 function updateActiveHeading() {
   const content = reportContent.value;
   if (!content) return;
-  const headings = Array.from(content.querySelectorAll("h1, h2, h3"));
+  const headings = Array.from(content.querySelectorAll("h1, h2, h3, h4"));
   if (!headings.length) return;
   let active = headings[0];
   for (const heading of headings) {
@@ -386,6 +387,7 @@ function scrollToHeading(id) {
   const heading = document.getElementById(id);
   if (!reportContent.value?.contains(heading)) return;
   heading?.scrollIntoView({ behavior: "smooth", block: "start" });
+  heading?.focus({ preventScroll: true });
 }
 
 function scrollToTop() {

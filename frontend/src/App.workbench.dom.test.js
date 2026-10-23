@@ -294,6 +294,44 @@ describe("research run navigation", () => {
 
   test("uses the report as the primary dossier view and exposes a section outline", async () => {
     const run = completedRun("run_reading");
+    run.plan.tasks = [
+      {
+        id: "task_1",
+        completed: true,
+        question: "Completed question",
+        acceptance_criteria: [],
+        task_type: "primary",
+        priority: "high",
+      },
+      {
+        id: "task_2",
+        completed: false,
+        question: "Pending question",
+        acceptance_criteria: [],
+        task_type: "follow_up",
+        priority: "medium",
+      },
+      {
+        id: "task_3",
+        completed: true,
+        question: "Another completed question",
+        acceptance_criteria: [],
+        task_type: "primary",
+        priority: "low",
+      },
+    ];
+    run.findings = [{ id: "finding_1" }, { id: "finding_2" }];
+    run.critiques = [{ iteration: 1, issues: [] }, { iteration: 2, issues: [] }];
+    run.evidence = ["evidence_1", "evidence_2", "evidence_3"].map((id) => ({
+      id,
+      claim: `Evidence ${id}`,
+      confidence: 0.9,
+      source: {
+        title: `Source ${id}`,
+        url: `https://example.com/${id}`,
+        source_type: "official",
+      },
+    }));
     run.report.markdown = [
       "# Evidence report",
       "",
@@ -304,6 +342,10 @@ describe("research run navigation", () => {
       "## Limitations",
       "",
       "Important limits.",
+      "",
+      "#### Residual risk",
+      "",
+      "Residual risk detail.",
     ].join("\n");
     globalThis.fetch = routeFetch([run]);
     window.history.replaceState({}, "", "/?run=run_reading");
@@ -315,12 +357,31 @@ describe("research run navigation", () => {
     await flushPromises();
     await flushPromises();
 
-    const tabs = wrapper.find('[role="tablist"][aria-label="研究档案内容"]');
+    const index = wrapper.find("[data-dossier-nav]");
+    expect(index.exists()).toBe(true);
+    expect(index.find(".dossier-index-title").text()).toBe("档案目录");
+    const tabs = index.find('[role="tablist"][aria-label="研究档案内容"]');
     expect(tabs.exists()).toBe(true);
+    expect(tabs.attributes("aria-orientation")).toBe("vertical");
     const reportTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("研究报告"));
     const planTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("研究计划"));
+    expect(tabs.text()).toContain("研究计划");
+    expect(tabs.text()).toContain("综合结论");
+    expect(tabs.text()).toContain("审稿意见");
+    expect(tabs.text()).toContain("审查证据");
+    expect(reportTab.text()).toContain("正文");
+    expect(planTab.text()).toContain("2 / 3 项");
+    expect(tabs.findAll('[role="tab"]')[2].text()).toContain("2 条");
+    expect(tabs.findAll('[role="tab"]')[3].text()).toContain("2 轮");
+    expect(tabs.findAll('[role="tab"]')[4].text()).toContain("3 条");
     expect(reportTab.attributes("aria-selected")).toBe("true");
     expect(wrapper.find('[role="tabpanel"]').text()).toContain("Long-form report body");
+    expect(
+      index.element.compareDocumentPosition(wrapper.find("#dossier-panel-report").element)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(index.find("[data-report-outline]").exists()).toBe(true);
+    expect(index.find("[data-report-outline]").text()).toContain("Limitations");
 
     await planTab.trigger("click");
     expect(planTab.attributes("aria-selected")).toBe("true");
@@ -329,11 +390,24 @@ describe("research run navigation", () => {
     await reportTab.trigger("click");
     await flushPromises();
 
-    const outline = wrapper.find("[data-report-outline]");
+    const outline = index.find("[data-report-outline]");
     expect(outline.exists()).toBe(true);
     expect(outline.text()).toContain("Main finding");
     expect(outline.text()).toContain("Limitations");
+    expect(outline.text()).toContain("Residual risk");
     expect(wrapper.find("[data-report-back-to-top]").exists()).toBe(true);
+    expect(outline.find('[data-heading-level="4"]').text()).toBe("Residual risk");
+
+    const limitations = outline.findAll("button").find(
+      (button) => button.text() === "Limitations",
+    );
+    await limitations.trigger("click");
+    expect(limitations.attributes("aria-current")).toBe("location");
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenLastCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+    expect(document.activeElement).toBe(wrapper.find("#report-heading-3").element);
   });
 
   test("opens the matching evidence and returns to the report citation", async () => {

@@ -95,27 +95,58 @@
               <p class="mt-1 break-words">{{ runError }}</p>
             </div>
 
-            <nav class="dossier-tabs" role="tablist" aria-label="研究档案内容" aria-orientation="horizontal">
-              <button
-                v-for="tab in dossierTabs"
-                :id="`dossier-tab-${tab.id}`"
-                :key="tab.id"
-                type="button"
-                role="tab"
-                class="dossier-tab"
-                :aria-selected="activeDossierTab === tab.id"
-                :aria-controls="`dossier-panel-${tab.id}`"
-                :tabindex="activeDossierTab === tab.id ? 0 : -1"
-                @click="activeDossierTab = tab.id"
-                @keydown.right.prevent="moveDossierTab(1)"
-                @keydown.left.prevent="moveDossierTab(-1)"
-              >
-                <span>{{ tab.label }}</span>
-                <small>{{ tab.count }}</small>
-              </button>
-            </nav>
-
             <div class="dossier-layout">
+              <aside data-dossier-nav class="dossier-index">
+                <p class="dossier-index-title">档案目录</p>
+                <nav class="dossier-tabs" role="tablist" aria-label="研究档案内容" aria-orientation="vertical">
+                  <button
+                    v-for="tab in dossierTabs"
+                    :id="`dossier-tab-${tab.id}`"
+                    :key="tab.id"
+                    type="button"
+                    role="tab"
+                    class="dossier-tab"
+                    :aria-selected="activeDossierTab === tab.id"
+                    :aria-controls="`dossier-panel-${tab.id}`"
+                    :tabindex="activeDossierTab === tab.id ? 0 : -1"
+                    @click="activeDossierTab = tab.id"
+                    @keydown.down.prevent="moveDossierTab(1)"
+                    @keydown.up.prevent="moveDossierTab(-1)"
+                    @keydown.right.prevent="moveDossierTab(1)"
+                    @keydown.left.prevent="moveDossierTab(-1)"
+                  >
+                    <span>{{ tab.label }}</span>
+                    <small>{{ tab.count }}</small>
+                  </button>
+                </nav>
+                <div
+                  v-if="activeDossierTab === 'report' && reportHeadings.length"
+                  data-report-outline
+                  class="index-outline"
+                  aria-label="报告主题"
+                >
+                  <div class="index-outline-head">
+                    <span>报告主题</span>
+                    <small>{{ activeHeadingLabel || "阅读位置" }}</small>
+                  </div>
+                  <button
+                    v-for="heading in reportHeadings"
+                    :key="heading.id"
+                    type="button"
+                    :data-heading-level="heading.level"
+                    :class="{ 'is-active': activeHeadingId === heading.id }"
+                    :aria-current="activeHeadingId === heading.id ? 'location' : undefined"
+                    @click="scrollToReportHeading(heading.id)"
+                  >
+                    <span class="index-outline-rule" aria-hidden="true"></span>
+                    <span>{{ heading.text }}</span>
+                  </button>
+                  <button data-report-back-to-top type="button" class="index-back-top" @click="scrollToReportTop">
+                    回到报告顶部
+                  </button>
+                </div>
+              </aside>
+
               <div class="folio-stack">
                 <section
                   v-show="activeDossierTab === 'report'"
@@ -124,21 +155,6 @@
                   aria-labelledby="dossier-tab-report"
                   class="dossier-panel"
                 >
-                  <div v-if="reportHeadings.length" data-report-outline class="report-outline-bar">
-                    <span class="report-outline-status">
-                      {{ activeHeadingLabel || "报告目录" }}
-                    </span>
-                    <div class="report-outline-links">
-                      <button
-                        v-for="heading in reportHeadings"
-                        :key="heading.id"
-                        type="button"
-                        :class="{ 'is-active': activeHeadingId === heading.id }"
-                        @click="scrollToReportHeading(heading.id)"
-                      >{{ heading.text }}</button>
-                    </div>
-                    <button data-report-back-to-top type="button" @click="scrollToReportTop">顶部</button>
-                  </div>
                   <div class="report-sheet">
                     <ReportView
                       ref="reportView"
