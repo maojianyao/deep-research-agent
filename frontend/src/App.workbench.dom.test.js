@@ -401,6 +401,8 @@ describe("research run navigation", () => {
     expect(outline.text()).toContain("Limitations");
     expect(outline.text()).toContain("Residual risk");
     expect(wrapper.find("[data-report-back-to-top]").exists()).toBe(true);
+    expect(outline.text()).not.toContain("Evidence report");
+    expect(outline.find(".index-outline-head small").text()).toContain("节");
     expect(outline.find('[data-heading-level="4"]').text()).toBe("Residual risk");
 
     const limitations = outline.findAll("button").find(
@@ -412,7 +414,10 @@ describe("research run navigation", () => {
       behavior: "smooth",
       block: "start",
     });
-    expect(document.activeElement).toBe(wrapper.find("#report-heading-3").element);
+    const limitationsHeading = wrapper.findAll(".markdown-content h2").find(
+      (heading) => heading.text() === "Limitations",
+    );
+    expect(document.activeElement).toBe(limitationsHeading.element);
   });
 
   test("opens the matching evidence and returns to the report citation", async () => {

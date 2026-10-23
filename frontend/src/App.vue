@@ -127,7 +127,7 @@
                 >
                   <div class="index-outline-head">
                     <span>报告主题</span>
-                    <small>{{ activeHeadingLabel || "阅读位置" }}</small>
+                    <small>{{ reportHeadings.length }} 节</small>
                   </div>
                   <button
                     v-for="heading in reportHeadings"
