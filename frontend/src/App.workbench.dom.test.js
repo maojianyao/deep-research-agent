@@ -371,9 +371,12 @@ describe("research run navigation", () => {
     expect(tabs.text()).toContain("审查证据");
     expect(reportTab.text()).toContain("正文");
     expect(planTab.text()).toContain("2 / 3 项");
-    expect(tabs.findAll('[role="tab"]')[2].text()).toContain("2 条");
-    expect(tabs.findAll('[role="tab"]')[3].text()).toContain("2 轮");
-    expect(tabs.findAll('[role="tab"]')[4].text()).toContain("3 条");
+    const findingTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("综合结论"));
+    const critiqueTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("审稿意见"));
+    const evidenceTab = tabs.findAll('[role="tab"]').find((tab) => tab.text().includes("审查证据"));
+    expect(findingTab.text()).toContain("2 条");
+    expect(critiqueTab.text()).toContain("2 轮");
+    expect(evidenceTab.text()).toContain("3 条");
     expect(reportTab.attributes("aria-selected")).toBe("true");
     expect(wrapper.find('[role="tabpanel"]').text()).toContain("Long-form report body");
     expect(
@@ -392,6 +395,8 @@ describe("research run navigation", () => {
 
     const outline = index.find("[data-report-outline]");
     expect(outline.exists()).toBe(true);
+    expect(outline.element.tagName).toBe("NAV");
+    expect(outline.attributes("aria-label")).toBe("报告主题");
     expect(outline.text()).toContain("Main finding");
     expect(outline.text()).toContain("Limitations");
     expect(outline.text()).toContain("Residual risk");

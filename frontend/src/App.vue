@@ -119,7 +119,7 @@
                     <small>{{ tab.count }}</small>
                   </button>
                 </nav>
-                <div
+                <nav
                   v-if="activeDossierTab === 'report' && reportHeadings.length"
                   data-report-outline
                   class="index-outline"
@@ -144,7 +144,7 @@
                   <button data-report-back-to-top type="button" class="index-back-top" @click="scrollToReportTop">
                     回到报告顶部
                   </button>
-                </div>
+                </nav>
               </aside>
 
               <div class="folio-stack">

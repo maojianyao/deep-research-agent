@@ -829,6 +829,13 @@ summary::-webkit-details-marker { display: none; }
 .markdown-content h2 { font-size: 1.25rem; }
 .markdown-content h3 { font-size: 1.05rem; }
 .markdown-content h4 { font-size: .98rem; }
+.markdown-content h1:focus-visible,
+.markdown-content h2:focus-visible,
+.markdown-content h3:focus-visible,
+.markdown-content h4:focus-visible {
+  outline: 2px solid var(--citation);
+  outline-offset: 4px;
+}
 .markdown-content p { margin: 0 0 .95em; }
 .markdown-content ul, .markdown-content ol { display: block; margin: .5em 0 1em; padding-left: 1.5em; }
 .markdown-content ul { list-style: disc; }
