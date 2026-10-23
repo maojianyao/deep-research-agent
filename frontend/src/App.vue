@@ -216,12 +216,7 @@
               </div>
 
               <aside class="margin-rail">
-                <section class="margin-card">
-                  <div class="margin-card-head"><h2>研究进度</h2><span>第 {{ store.run.iteration }} / {{ store.run.max_iterations }} 轮</span></div>
-                  <strong class="progress-figure">{{ progress }}%</strong>
-                  <div class="progress-track"><span :style="{ width: `${progress}%` }"></span></div>
-                  <p class="progress-caption">审稿与补证会在同一研究中持续推进。</p>
-                </section>
+                <ResearchStagePanel :run="store.run" />
                 <section class="margin-card">
                   <div class="margin-card-head"><h2>活动记录</h2><span>{{ store.run.events.length }} 条</span></div>
                   <div class="activity-list"><article v-for="event in [...store.run.events].slice(-10).reverse()" :key="event.sequence" class="activity-entry"><span class="activity-dot"></span><div>{{ event.message }}<time class="activity-time">{{ formatDate(event.created_at) }}</time></div></article><p v-if="!store.run.events.length" class="empty-note">暂无活动记录。</p></div>
@@ -304,6 +299,7 @@ import CitationDialog from "./components/CitationDialog.vue";
 import FollowUpPanel from "./components/FollowUpPanel.vue";
 import CreateResearchDialog from "./components/CreateResearchDialog.vue";
 import EvidenceLibrary from "./components/EvidenceLibrary.vue";
+import ResearchStagePanel from "./components/ResearchStagePanel.vue";
 import { buildCitationContext } from "./lib/citations";
 
 const store = useResearchStore();
@@ -359,13 +355,6 @@ const completedTasks = computed(() => store.run?.plan?.tasks?.filter((task) => t
 const runError = computed(() => store.run?.error || "");
 const followUpBusy = computed(() => followUpSubmitting.value || store.selectedFollowUpBusy);
 const narrowViewport = computed(() => windowWidth.value < 640);
-const progress = computed(() => {
-  const run = store.run;
-  if (!run) return 0;
-  if (run.status === "completed") return 100;
-  const tasks = run.plan?.tasks || [];
-  return Math.min(94, Math.round(run.iteration / Math.max(1, run.max_iterations) * 75 + tasks.filter((task) => task.completed).length / Math.max(1, tasks.length) * 25));
-});
 const today = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" });
 const connectionLabel = computed(() => ({ online: "API 已连接", stream: "实时连接", polling: "轮询回退", offline: "API 未连接", connecting: "正在连接" })[store.connection]);
 
