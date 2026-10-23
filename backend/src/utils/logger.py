@@ -108,7 +108,7 @@ class LogManager:
         log_dir: str = ROOT_PATH / "logs",
         retention_days: int = 7,
         file_level: int = logging.INFO,
-        console_level: int = logging.DEBUG,
+        console_level: int = logging.ERROR,
         fmt: str = None,
         datefmt: str = None,
     ) -> logging.Logger:
