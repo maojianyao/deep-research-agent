@@ -53,7 +53,7 @@ export function buildCitationContext(markdown, fallbackIds = [], sections = []) 
     }
   }
   for (const referenceId of fallbackIds) {
-    if (!labels[referenceId]) addOccurrence(referenceId);
+    if (!labels[referenceId]) labels[referenceId] = String(next++);
   }
   return { labels, occurrences };
 }
