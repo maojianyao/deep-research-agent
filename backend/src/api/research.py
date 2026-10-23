@@ -17,7 +17,7 @@ from backend.src.research.schemas import ResearchRun, RunStatus
 from backend.src.research.language import language_profile, resolve_report_language
 from backend.src.api.follow_ups import cancel_follow_up_tasks
 from backend.src.services.follow_up import report_anchor_digest
-from backend.src.storage.repository import ResearchRunRepository
+from backend.src.storage.repository import ACTIVE_RESEARCH_STATUSES, ResearchRunRepository
 from backend.src.utils.logger import get_logger
 from .schemas import (
     AcceptedResearchRun, CitationReferenceView, CreateResearchRun, ResearchProgress,
@@ -308,7 +308,8 @@ def list_research_runs(
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, min_length=1, max_length=200),
 ):
-    if status_filter and status_filter not in {item.value for item in RunStatus}:
+    valid_statuses = {item.value for item in RunStatus} | {"active"}
+    if status_filter and status_filter not in valid_statuses:
         raise HTTPException(status_code=422, detail="Invalid research status")
     repository: ResearchRunRepository = request.app.state.repository
     rows = repository.list_runs(
@@ -328,7 +329,20 @@ def list_research_runs(
             "report_language_quality": profile.quality,
             "report_direction": profile.direction,
         })
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "summary": {
+            "total": repository.count_runs(),
+            "active": repository.count_runs(status="active"),
+            "completed": repository.count_runs(status=RunStatus.COMPLETED.value),
+            "needs_human_review": repository.count_runs(
+                status=RunStatus.NEEDS_HUMAN_REVIEW.value
+            ),
+        },
+    }
 
 
 @router.get("/{run_id}", response_model=ResearchRunDetail)

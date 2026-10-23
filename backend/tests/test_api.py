@@ -49,6 +49,56 @@ class ResearchApiTests(unittest.TestCase):
         self.assertEqual(response.json()["total"], 1)
         self.assertEqual(response.json()["items"][0]["id"], first.id)
 
+    def test_active_status_group_and_workspace_summary_are_page_independent(self):
+        repository = self.app.state.repository
+        active_statuses = [
+            RunStatus.PLANNING,
+            RunStatus.CRITIC_REVIEW,
+            RunStatus.WRITING,
+        ]
+        saved = []
+        for index, status in enumerate(active_statuses):
+            run = make_persisted_run(f"_active_{index}")
+            run.status = status
+            repository.save_run(run)
+            saved.append(run)
+
+        completed = make_persisted_run("_completed")
+        completed.status = RunStatus.COMPLETED
+        repository.save_run(completed)
+        paused = make_persisted_run("_paused")
+        paused.status = RunStatus.PAUSED
+        repository.save_run(paused)
+        review = make_persisted_run("_review")
+        review.status = RunStatus.NEEDS_HUMAN_REVIEW
+        repository.save_run(review)
+
+        first_page = self.client.get(
+            "/api/research-runs",
+            params={"status": "active", "page": 1, "page_size": 2},
+        )
+        second_page = self.client.get(
+            "/api/research-runs",
+            params={"status": "active", "page": 2, "page_size": 2},
+        )
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.json()["total"], 3)
+        self.assertEqual(len(first_page.json()["items"]), 2)
+        self.assertEqual(second_page.json()["total"], 3)
+        self.assertEqual(len(second_page.json()["items"]), 1)
+        returned_ids = {
+            item["id"]
+            for item in first_page.json()["items"] + second_page.json()["items"]
+        }
+        self.assertEqual(returned_ids, {run.id for run in saved})
+        self.assertEqual(first_page.json()["summary"], {
+            "total": 6,
+            "active": 3,
+            "completed": 1,
+            "needs_human_review": 1,
+        })
+
     def test_detail_and_markdown_download(self):
         run = make_persisted_run()
         self.app.state.repository.save_run(run)

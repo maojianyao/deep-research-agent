@@ -24,6 +24,7 @@
           :key="filter.label"
           class="filter-button"
           :class="{ 'is-active': store.statusFilter === filter.value }"
+          :aria-pressed="store.statusFilter === filter.value"
           @click="store.selectStatus(filter.value)"
         >{{ filter.label }}</button>
       </div>
@@ -93,7 +94,7 @@ defineEmits(["open", "finish", "continue", "delete"]);
 
 const filters = [
   { label: "全部", value: "" },
-  { label: "进行中", value: "researching" },
+  { label: "进行中", value: "active" },
   { label: "已完成", value: "completed" },
   { label: "待复核", value: "needs_human_review" },
 ];

@@ -7,6 +7,7 @@ const terminal = new Set(["completed", "failed", "needs_human_review", "cancelle
 export const useResearchStore = defineStore("research", {
   state: () => ({
     runs: [], total: 0, page: 1, pageSize: 20, search: "", statusFilter: "",
+    summary: { total: 0, active: 0, completed: 0, needs_human_review: 0 },
     runId: null, run: null, eventSequence: 0, eventSource: null, pollTimer: null,
     listTimer: null, connection: "connecting", loading: false, error: "",
     followUps: [], selectedFollowUpId: null,
@@ -34,6 +35,7 @@ export const useResearchStore = defineStore("research", {
         const data = await api(`/research-runs?${params}`);
         this.runs = data.items;
         this.total = data.total;
+        this.summary = data.summary || this.summary;
         this.connection = "online";
         this.error = "";
         if (this.page > this.pageCount) { this.page = this.pageCount; return this.loadRuns(); }

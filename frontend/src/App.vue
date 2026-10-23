@@ -41,10 +41,10 @@
           </section>
 
           <section class="workspace-ledger" aria-label="研究任务总览">
-            <div class="ledger-metric"><span class="metric-label">全部研究</span><strong class="metric-value">{{ store.total }}</strong><span class="metric-note">工作区中的研究档案</span></div>
-            <div class="ledger-metric"><span class="metric-label">正在推进</span><strong class="metric-value">{{ activeCount }}</strong><span class="metric-note is-warm">当前页持续更新</span></div>
-            <div class="ledger-metric"><span class="metric-label">已形成报告</span><strong class="metric-value">{{ completedCount }}</strong><span class="metric-note is-good">当前页可阅读</span></div>
-            <div class="ledger-metric"><span class="metric-label">等待判断</span><strong class="metric-value">{{ reviewCount }}</strong><span class="metric-note is-alert">当前页需人工复核</span></div>
+            <div class="ledger-metric"><span class="metric-label">全部研究</span><strong class="metric-value">{{ store.summary.total }}</strong><span class="metric-note">工作区中的研究档案</span></div>
+            <div class="ledger-metric"><span class="metric-label">正在推进</span><strong class="metric-value">{{ store.summary.active }}</strong><span class="metric-note is-warm">全工作区持续更新</span></div>
+            <div class="ledger-metric"><span class="metric-label">已形成报告</span><strong class="metric-value">{{ store.summary.completed }}</strong><span class="metric-note is-good">全工作区可阅读</span></div>
+            <div class="ledger-metric"><span class="metric-label">等待判断</span><strong class="metric-value">{{ store.summary.needs_human_review }}</strong><span class="metric-note is-alert">全工作区需人工复核</span></div>
           </section>
 
           <WorkflowDiagram id="workflow" />
@@ -242,9 +242,6 @@ const reportLanguages = [
 ];
 
 const pageTitle = computed(() => store.run?.user_request || "研究任务");
-const activeCount = computed(() => store.runs.filter((item) => !["completed", "failed", "cancelled", "needs_human_review", "paused"].includes(item.status)).length);
-const completedCount = computed(() => store.runs.filter((item) => item.status === "completed").length);
-const reviewCount = computed(() => store.runs.filter((item) => item.status === "needs_human_review").length);
 const completedTasks = computed(() => store.run?.plan?.tasks?.filter((task) => task.completed).length || 0);
 const runError = computed(() => store.run?.error || "");
 const followUpBusy = computed(() => followUpSubmitting.value || store.selectedFollowUpBusy);

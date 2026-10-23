@@ -17,6 +17,15 @@ from .models import (
     ResearchTaskModel, RunEventModel, SourceDocumentModel,
 )
 
+ACTIVE_RESEARCH_STATUSES = (
+    "planning",
+    "researching",
+    "reviewing_evidence",
+    "synthesizing",
+    "critic_review",
+    "writing",
+)
+
 
 class ResearchRunRepository:
     def __init__(self, engine: Engine):
@@ -368,7 +377,9 @@ class ResearchRunRepository:
 
     @staticmethod
     def _run_filters(query, status: str | None, search: str | None):
-        if status:
+        if status == "active":
+            query = query.where(ResearchRunModel.status.in_(ACTIVE_RESEARCH_STATUSES))
+        elif status:
             query = query.where(ResearchRunModel.status == status)
         if search:
             query = query.where(ResearchRunModel.user_request.contains(search, autoescape=True))

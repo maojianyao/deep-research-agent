@@ -57,6 +57,14 @@ class ResearchRunList(BaseModel):
     total: int
     page: int
     page_size: int
+    summary: "ResearchRunSummaryCounts"
+
+
+class ResearchRunSummaryCounts(BaseModel):
+    total: int
+    active: int
+    completed: int
+    needs_human_review: int
 
 
 class SourceView(BaseModel):
